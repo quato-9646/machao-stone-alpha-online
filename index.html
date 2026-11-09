@@ -3233,7 +3233,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
   function fsCall(method, path, body, noAuth) {
     var go = noAuth ? Promise.resolve() : ensureToken();
     return go.then(function () {
-      var h = { 'Content-Type': 'application/json' }; if (!noAuth && session) h.Authorization = 'Bearer ' + session.token;
+      var h = { 'Content-Type': 'application/json' }; if (session && session.token && (!noAuth || Date.now() < (session.exp || 0))) h.Authorization = 'Bearer ' + session.token;   // public reads still carry the login when it is valid
       return fbFetch(fsBase() + path, { method: method, headers: h, body: body ? JSON.stringify(body) : undefined });
     }).then(function (r) {
       if (r.status === 404 && method === 'GET') return null;
