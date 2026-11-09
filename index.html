@@ -2728,6 +2728,113 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
 (function () {
   'use strict';
   var MJ = window.MJ;
+  // ---------- CPU self-learning (admin): the shared CPU plays itself and its parameters are nudged ----------
+  // One run = 1000 hanchan: search (random perturbations, successive halving) + fresh-seed validation. A change is kept only when it beats the current CPU.
+  var KEYS = ['th0', 'th1', 'th2', 'th3', 'thRest', 'ratioK', 'chipWin', 'dangerMul', 'dealerMul', 'chipKeep', 'dgChip', 'wDg1', 'wDg2', 'wShanten', 'doraDanger'];
+  var LIM = { th0: [0.01, 0.8], th1: [0.005, 0.6], th2: [0.005, 0.5], th3: [0.005, 0.5], thRest: [0.002, 0.3], ratioK: [0.2, 4], chipWin: [0.3, 3], dangerMul: [0.4, 3], dealerMul: [1, 5], chipKeep: [0, 8], dgChip: [0, 4], wDg1: [20, 2000], wDg2: [5, 400], wShanten: [10, 600], doraDanger: [0.8, 4] };
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function current() {
+    var prm = {}; KEYS.forEach(function (k) { prm[k] = MJ.AI.TUNED[k]; });
+    return { prm: prm, cfg: { riichiProb: MJ.AI.TUNED_CFG.riichiProb, riichiVsRiichi: MJ.AI.TUNED_CFG.riichiVsRiichi } };
+  }
+  function sane(o) {
+    if (!o || !o.prm || !o.cfg) return null;
+    var prm = {}, ok = true;
+    KEYS.forEach(function (k) { var v = Number(o.prm[k]); if (!isFinite(v)) ok = false; else prm[k] = clamp(v, LIM[k][0], LIM[k][1]); });
+    var rp = Number(o.cfg.riichiProb), rv = Number(o.cfg.riichiVsRiichi);
+    if (!ok || !isFinite(rp) || !isFinite(rv)) return null;
+    return { prm: prm, cfg: { riichiProb: clamp(rp, 0.3, 1), riichiVsRiichi: clamp(rv, 0, 1) } };
+  }
+  // the TUNED object is shared by reference everywhere (styles, default policy), so it is updated in place
+  function applyLearned(o) {
+    o = sane(o); if (!o) return false;
+    Object.assign(MJ.AI.TUNED, o.prm);
+    MJ.AI.TUNED_CFG.riichiProb = o.cfg.riichiProb; MJ.AI.TUNED_CFG.riichiVsRiichi = o.cfg.riichiVsRiichi;
+    MJ.AI.DEFAULT_CFG.policy.riichiProb = o.cfg.riichiProb; MJ.AI.DEFAULT_CFG.policy.riichiVsRiichi = o.cfg.riichiVsRiichi;
+    var ev = MJ.AI.STYLES.ev; if (ev && ev.cfg) { ev.cfg.riichiProb = o.cfg.riichiProb; ev.cfg.riichiVsRiichi = o.cfg.riichiVsRiichi; }
+    return true;
+  }
+  function polCfg(o) { return { style: 'ev', prm: Object.assign({}, MJ.AI.PRM0, o.prm), riichiProb: o.cfg.riichiProb, riichiVsRiichi: o.cfg.riichiVsRiichi }; }
+  // one hanchan with the candidate on `seat` and the baseline on the other two seats (no Monte Carlo: fast); returns the candidate's total (points/1000 + chips)
+  function playOne(candCfg, baseCfg, seed, seat) {
+    var m = MJ.Sim.newMatch(['c', 'b', 'b'], ['c', 'b1', 'b2'], seed, seed % 3), n = 0;
+    var cfgs = [baseCfg, baseCfg, baseCfg]; cfgs[seat] = candCfg;
+    var g = m.g;
+    while (!g.over && n < 60) {
+      g.startHand();
+      var res = g.runHand(function (gg, req) { return MJ.AI.quickPolicy(gg, req, cfgs[req.seat]); });
+      MJ.Sim.recordHand(m, res); g.prepareNext(); n++;
+    }
+    return MJ.Sim.matchResult(m).seats[seat].total;
+  }
+  function stats(a) {
+    var n = a.length, s = 0, i; for (i = 0; i < n; i++) s += a[i];
+    var m = n ? s / n : 0, v = 0; for (i = 0; i < n; i++) v += (a[i] - m) * (a[i] - m);
+    return { n: n, mean: m, se: n > 1 ? Math.sqrt(v / (n - 1) / n) : 99 };
+  }
+  function create(opt) {
+    opt = opt || {};
+    var seed = (opt.seed || (Date.now() & 0x7fffffff)) >>> 0, rng = MJ.mulberry32(seed ^ 0x9e3779b9);
+    function gauss() { var u = 0, v = 0; while (!u) u = rng(); while (!v) v = rng(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+    var base = current(), baseCfg = polCfg(base);
+    var cands = [];
+    for (var i = 0; i < 16; i++) {
+      var p = {}; KEYS.forEach(function (k) { p[k] = clamp(base.prm[k] * Math.exp(0.1 * gauss()), LIM[k][0], LIM[k][1]); });
+      var o = { prm: p, cfg: { riichiProb: clamp(base.cfg.riichiProb + 0.02 * gauss(), 0.5, 1), riichiVsRiichi: clamp(base.cfg.riichiVsRiichi + 0.06 * gauss(), 0, 1) } };
+      cands.push({ o: o, cfg: polCfg(o), res: [] });
+    }
+    // Every candidate game is paired with a control game (same deal, same seat, current CPU in all seats), which cuts the noise ~8x.
+    // The control game of a deal is shared by all candidates. Budget (control games included): 16x60+60 | 4x250+250 | 1x1000+1000 | validation 13000+13000 = ~30000 hanchan.
+    // The paired difference has sd ~45 points per hanchan, so 13000 pairs give se ~0.4: a real gain of +1.0/hanchan (1 chip) is found with ~80% probability at z>=1.64; smaller gains are not worth chasing.
+    var plan = [{ name: '候補を試す', per: 60, keep: 16 }, { name: '有望な候補を絞る', per: 250, keep: 4 }, { name: '最有力を確かめる', per: 1000, keep: 1 }, { name: '現在のCPUと対戦(検証)', per: 13000, keep: 1, validate: true }];
+    var total = 16 * 60 + 60 + 4 * 250 + 250 + 1000 + 1000 + 13000 * 2, ctrl = {};
+    var st = { stage: 0, queue: [], alive: cands.slice(), played: 0, valid: [], seedCtr: 0, done: false, result: null, cur: null };
+    function startStage() {
+      var s = plan[st.stage]; st.queue = [];
+      if (s.validate) { var b = st.alive[0]; for (var j = 0; j < s.per; j++) st.queue.push({ c: b, j: j, v: true }); }
+      else st.alive.forEach(function (c) { for (var j = 0; j < s.per; j++) st.queue.push({ c: c, j: c.res.length + j }); });
+    }
+    startStage();
+    function finishStage() {
+      var s = plan[st.stage];
+      if (s.validate) {
+        var b = st.alive[0], vs = stats(st.valid), z = vs.se > 0 ? vs.mean / vs.se : 0;
+        st.done = true;
+        st.result = { accepted: vs.mean > 0 && z >= 1.64, mean: vs.mean, se: vs.se, z: z, n: vs.n, base: base, cand: sane(b.o), searchMean: stats(b.res).mean, searchN: b.res.length };
+        return;
+      }
+      st.alive.sort(function (a, b) { return stats(b.res).mean - stats(a.res).mean; });
+      st.stage++; st.alive = st.alive.slice(0, plan[st.stage].keep); startStage();
+    }
+    return {
+      total: total,
+      state: function () { return { played: st.played, total: total, stage: st.stage, stageName: plan[st.stage].name, done: st.done }; },
+      step: function (ms) {
+        var t0 = Date.now();
+        while (!st.done && Date.now() - t0 < ms) {
+          if (!st.queue.length) { finishStage(); continue; }
+          var q = st.queue.shift();
+          // common random numbers: the same seed/seat for every candidate at the same index
+          var sd = (seed + (q.v ? 5000011 : 0) + q.j * 7919) >>> 0, seat = q.j % 3;
+          var ck = sd + ':' + seat;
+          if (!(ck in ctrl)) { ctrl[ck] = playOne(baseCfg, baseCfg, sd, seat); st.played++; }
+          var v = playOne(q.c.cfg, baseCfg, sd, seat) - ctrl[ck];
+          if (q.v) st.valid.push(v); else q.c.res.push(v);
+          st.played++;
+        }
+        if (!st.done && !st.queue.length) finishStage();
+        return st.done;
+      },
+      result: function () { return st.result; }
+    };
+  }
+  MJ.AI.TUNED0 = Object.assign({}, MJ.AI.TUNED); MJ.AI.TUNED_CFG0 = Object.assign({}, MJ.AI.TUNED_CFG);
+  MJ.Learn = { create: create, current: current, applyLearned: applyLearned, sane: sane, KEYS: KEYS };
+})();
+
+(function () {
+  'use strict';
+  var MJ = window.MJ;
   var NAMES = ['あなた', 'CPU-A', 'CPU-B'];
   var SEATWIND = ['東', '南', '西'];
   var HONOR = { 27: '東', 28: '南', 29: '西', 31: '白', 32: '發', 33: '中' };
@@ -3543,7 +3650,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     return h + '<p class="muted" style="font-size:12px">この機能の結果は近似です。実際の対局とは違いが出ることがあります。</p>';
   }
   function adminList() {
-    if (!bkReady()) { showModal('<h2>管理者(admin)</h2><p>サーバー(Firebase)が設定されていないため、プレイヤーのデータはありません。</p><div class="foot"><button class="btn" data-act="closemodal">閉じる</button></div>'); return; }
+    if (!bkReady()) { showModal('<h2>管理者(admin)</h2><p>サーバー(Firebase)が設定されていないため、プレイヤーのデータはありません。</p><div class="foot"><button class="btn" data-act="cpuopen">CPU強化</button><button class="btn" data-act="closemodal">閉じる</button></div>'); return; }
     showModal('<h2>管理者(admin)</h2><p class="muted">読み込み中…</p>');
     bkCall('mj_admin_players', {}).then(function (rows) {
       rows = rows.filter(function (p) { return p.uid; }).sort(function (x, y) { return ((y.stats && y.stats.hands) || 0) - ((x.stats && x.stats.hands) || 0); });
@@ -3557,7 +3664,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
         });
         h += '</table>';
       }
-      showModal(h + '<div class="foot"><button class="btn" data-act="closemodal">閉じる</button></div>');
+      showModal(h + '<div class="foot"><button class="btn go" data-act="cpuopen">CPU強化</button><button class="btn" data-act="closemodal">閉じる</button></div>');
     }).catch(function (e) { showModal('<h2>管理者(admin)</h2><p role="alert" style="color:#e66">' + esc(errText(e)) + '</p><div class="foot"><button class="btn" data-act="closemodal">閉じる</button></div>'); });
   }
   function adminView(uid, name) {
@@ -3597,6 +3704,88 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     return h + '</table>';
   }
   var RK_TABS = [['sum', '総収支'], ['avg', '平均着順'], ['chips', '最大祝儀'], ['totals', '最高スコア']];
+
+  // ---- admin: CPU self-learning (the CPU that every player faces is shared, so the learned values live on the server) ----
+  var cpuInfo = null, cpuTrain = null;
+  function cpuParamDoc(o, info) {
+    return { fields: { prm: toFS(JSON.stringify(o.prm)), cfg: toFS(JSON.stringify(o.cfg)), gen: toFS(info.gen | 0), hanchan: toFS(info.hanchan | 0), diff: toFS(+info.diff || 0), updated: toFS(new Date()) } };
+  }
+  function cpuFromDoc(d) {
+    if (!d) return null;
+    var x = docObj(d), o; try { o = MJ.Learn.sane({ prm: JSON.parse(x.prm), cfg: JSON.parse(x.cfg) }); } catch (e) { return null; }
+    return o ? { o: o, gen: x.gen | 0, hanchan: x.hanchan | 0, diff: +x.diff || 0, updated: x.updated || '' } : null;
+  }
+  function loadCpuParams() {   // everybody (logged in or not) gets the learned CPU at start-up
+    if (!bkReady()) return Promise.resolve();
+    return fsCall('GET', '/cpu/params', null, true).then(function (d) { var r = cpuFromDoc(d); if (r && MJ.Learn.applyLearned(r.o)) cpuInfo = r; }).catch(function () { });
+  }
+  function cpuHTML(msg) {
+    var i = cpuInfo;
+    return '<h2>CPU強化(自己学習)</h2>' +
+      '<p>全プレイヤーが対戦するCPUどうしを約3万半荘ぶん打たせて、押し引きなどの数値を少しずつ調整します。結果が本当に強くなったと確認できた時だけ採用し、サーバーに保存します(全員の次の対局から反映)。</p>' +
+      '<table class="prof"><tbody><tr><th>現在のCPU</th><td>' + (i ? '第' + i.gen + '世代(学習済み ' + i.hanchan + '半荘)' : '標準(まだ強化していません)') + '</td></tr>' +
+      (i && i.updated ? '<tr><th>最終更新</th><td>' + esc(String(i.updated).replace('T', ' ').slice(0, 16)) + '(検証での差 ' + (i.diff >= 0 ? '+' : '') + i.diff.toFixed(2) + '/半荘)</td></tr>' : '') + '</tbody></table>' +
+      '<p class="muted" style="font-size:12px">所要時間の目安は数分〜10分ほどです(端末の速さによります)。「1半荘あたり+1枚(1000点)ぶんの強化」を見分けられる回数にしてあります。実行中は画面を開いたままにしてください。学習中はこの画面を閉じないでください。</p>' +
+      (msg ? '<p role="alert">' + msg + '</p>' : '') +
+      '<div class="foot"><button class="btn ghost" data-act="adminlist">戻る</button>' + (i ? '<button class="btn ghost" data-act="cpuundo">ひとつ前に戻す</button><button class="btn ghost" data-act="cpureset">標準に戻す</button>' : '') + '<button class="btn go" data-act="cpustart">強化を開始(約3万半荘)</button></div>';
+  }
+  function cpuOpen() {
+    showModal(cpuHTML(''));
+    if (bkReady()) loadCpuParams().then(function () { if (!cpuTrain && !$('#modal').hidden && $('#modal h2') && /CPU強化/.test($('#modal h2').textContent)) showModal(cpuHTML('')); });
+  }
+  function cpuSave(o, gen, hanchan, diff) {
+    if (!bkReady()) return Promise.resolve('local');
+    if (!session) return Promise.reject({ code: 'invalid_session' });
+    var prev = cpuInfo;
+    var pr = prev ? fsCall('PATCH', '/cpu/prev', cpuParamDoc(prev.o, prev)) : Promise.resolve();
+    return pr.then(function () { return fsCall('PATCH', '/cpu/params', cpuParamDoc(o, { gen: gen, hanchan: hanchan, diff: diff })); }).then(function () { return 'server'; });
+  }
+  function yieldNow() {   // MessageChannel is not throttled like setTimeout in background tabs
+    return new Promise(function (res) { try { var c = new MessageChannel(); c.port1.onmessage = function () { res(); }; c.port2.postMessage(0); } catch (e) { setTimeout(res, 0); } });
+  }
+  async function cpuStart() {
+    if (cpuTrain) return;
+    if (bkReady() && !session) { showModal(cpuHTML('保存にはログインが必要です。いったん閉じて、プレイヤーとしてログインしてからやり直してください。')); return; }
+    var L = MJ.Learn.create({}), T = cpuTrain = { abort: false }, t0 = Date.now();
+    showModal('<h2>CPU強化中…</h2><p id="cpt-stage">準備中</p><div style="height:14px;background:#dfe6e2;border-radius:7px;overflow:hidden"><div id="cpt-bar" style="height:100%;width:0;background:#4fc08d"></div></div>' +
+      '<p id="cpt-txt" class="muted" style="font-size:12px">0 / ' + L.total + ' 半荘</p><div class="foot"><button class="btn" data-act="cpustop">中止</button></div>');
+    var done = false;
+    while (!done) {
+      try { done = L.step(50); } catch (e) { cpuTrain = null; showModal(cpuHTML('エラーが発生しました: ' + esc(e && e.message || e))); return; }
+      var st = L.state(), bar = $('#cpt-bar'), tx = $('#cpt-txt'), sg = $('#cpt-stage');
+      if (bar) bar.style.width = Math.min(100, st.played / st.total * 100).toFixed(1) + '%';
+      if (tx) tx.textContent = st.played + ' / ' + st.total + ' 半荘 (' + Math.round((Date.now() - t0) / 1000) + '秒)';
+      if (sg) sg.textContent = '段階 ' + Math.min(4, st.stage + 1) + '/4: ' + st.stageName;
+      await yieldNow();
+      if (T.abort) { cpuTrain = null; showModal(cpuHTML('中止しました。変更はありません。')); return; }
+    }
+    cpuTrain = null;
+    var r = L.result(), d = (r.mean >= 0 ? '+' : '') + r.mean.toFixed(2), msg;
+    var line = '検証 ' + r.n + '組: 新しいCPUは現在のCPUより1半荘あたり <b>' + d + '</b> (±' + r.se.toFixed(2) + ')。';
+    if (!r.accepted) { showModal(cpuHTML(line + '<br>差が確認できなかったため、<b>変更しませんでした</b>。もう一度押すと別の候補で試します。')); return; }
+    var gen = (cpuInfo ? cpuInfo.gen : 0) + 1, hc = (cpuInfo ? cpuInfo.hanchan : 0) + L.total;
+    try {
+      var how = await cpuSave(r.cand, gen, hc, r.mean);
+      MJ.Learn.applyLearned(r.cand); cpuInfo = { o: r.cand, gen: gen, hanchan: hc, diff: r.mean, updated: new Date().toISOString() };
+      msg = line + '<br><b>採用しました</b>(第' + gen + '世代)。' + (how === 'server' ? 'サーバーに保存したので、全員の次の対局から反映されます。' : 'サーバー未接続のため、このページを開いている間だけ有効です。');
+    } catch (e) { msg = line + '<br>採用しましたが、サーバーに保存できませんでした: ' + esc(errText(e)) + '<br>(このページを開いている間だけ有効です)'; MJ.Learn.applyLearned(r.cand); }
+    showModal(cpuHTML(msg));
+  }
+  async function cpuRestore(kind) {
+    try {
+      var o, gen = 0, hc = 0, diff = 0;
+      if (kind === 'undo') {
+        var d = bkReady() ? await fsCall('GET', '/cpu/prev', null, true) : null, p = cpuFromDoc(d);
+        if (!p) { showModal(cpuHTML('ひとつ前の記録がありません。')); return; }
+        o = p.o; gen = p.gen; hc = p.hanchan; diff = p.diff;
+      } else o = { prm: MJ.AI.TUNED0, cfg: MJ.AI.TUNED_CFG0 };
+      if (bkReady()) { if (!session) { showModal(cpuHTML('保存にはログインが必要です。')); return; } await fsCall('PATCH', '/cpu/params', cpuParamDoc(MJ.Learn.sane(o), { gen: gen, hanchan: hc, diff: diff })); }
+      MJ.Learn.applyLearned(o);
+      cpuInfo = kind === 'reset' ? null : { o: MJ.Learn.sane(o), gen: gen, hanchan: hc, diff: diff, updated: new Date().toISOString() };
+      showModal(cpuHTML(kind === 'undo' ? 'ひとつ前の状態に戻しました。' : '標準のCPUに戻しました。'));
+    } catch (e) { showModal(cpuHTML(esc(errText(e)))); }
+  }
+
   var rkData = null, rkTab = 'sum', rkMode = 'cpu', recMode = 'cpu', recData = null, recAdmin = false;
   function modeTabsHTML(cur, act) {
     return '<div class="rktabs modetabs" role="tablist">' + [['cpu', 'CPU対局'], ['online', 'オンライン対局']].map(function (t) {
@@ -4942,6 +5131,11 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     if (a === 'adminopen') { if (S.admin) adminList(); else { showModal(adminLoginHTML('')); setTimeout(function () { var i = $('#adm-pw'); if (i) i.focus(); }, 50); } return; }
     if (a === 'adminlogin') { var pw = ($('#adm-pw') || {}).value || ''; if (pw === ADMIN_PW) { S.admin = true; adminList(); } else { showModal(adminLoginHTML('パスワードが違います')); } return; }
     if (a === 'adminlist') { adminList(); return; }
+    if (a === 'cpuopen') { cpuOpen(); return; }
+    if (a === 'cpustart') { cpuStart(); return; }
+    if (a === 'cpustop') { if (cpuTrain) cpuTrain.abort = true; return; }
+    if (a === 'cpuundo') { cpuRestore('undo'); return; }
+    if (a === 'cpureset') { cpuRestore('reset'); return; }
     if (a === 'adminview') { adminView(b.dataset.uid, b.dataset.name); return; }
     if (a === 'openrank') { openRanking(); return; }
     if (a === 'resume') { startMatch(true); return; }
@@ -5023,6 +5217,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
   }
 
   function init() {
+    loadCpuParams();
     root = $('#main');
     setTimeout(startYakumanWatch, 300);
     var fx = document.createElement('div'); fx.id = 'fx'; fx.className = 'fx'; fx.setAttribute('aria-live', 'assertive'); document.body.appendChild(fx);
