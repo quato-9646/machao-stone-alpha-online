@@ -2672,7 +2672,7 @@ if (typeof module !== 'undefined' && module.exports) { require('./score.js'); re
   // ---------------- CPU styles (simulation / viewing modes) ----------------
   var STYLES = {
     careful: { name: '慎重降り型', desc: 'リーチや高そうな仕掛け(祝儀含む)には、早めに丁寧に降ります。', cfg: { style: 'careful' } },
-    ev: { name: '期待値徹底型', desc: '点数と祝儀(1枚=1000点)の期待値で押し引きを徹底。重要な場面はモンテカルロで確認します。自己対戦で調整済み。', cfg: { style: 'ev', prm: TUNED, riichiProb: TUNED_CFG.riichiProb, riichiVsRiichi: TUNED_CFG.riichiVsRiichi }, mc: true },
+    ev: { name: '期待値徹底型', desc: '点数と祝儀(1枚=1000点)の期待値で押し引きを徹底。重要な場面はモンテカルロで確認します。', cfg: { style: 'ev', prm: TUNED, riichiProb: TUNED_CFG.riichiProb, riichiVsRiichi: TUNED_CFG.riichiVsRiichi }, mc: true },
     allin: { name: '1シャンテン全押し型', desc: '1シャンテン以内になったら、何を切ってでも押して和了を狙います。祝儀はあまり気にしません。', cfg: { style: 'allin', chipAI: false } },
     chip: { name: '祝儀重視型', desc: 'ジュエル牌・赤を残し、祝儀牌を拾いに行きつつ、1シャンテンからは押します。', cfg: { style: 'chip' } }
   };
@@ -2902,7 +2902,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
   function profileHTML() {
     var p = profile, f = riichiThreat();
     return '<h3 style="margin:14px 0 4px">CPUの学習(あなたの傾向)</h3>' +
-      '<p class="muted" style="margin:0 0 6px">CPUの押し引きの数値は、CPU同士の自己対戦(約34万半荘)で調整済みです。このページでは、さらにあなたの傾向(リーチ時の和了率)を記録して、あなたのリーチへの警戒度を調整します。記録はこのブラウザにだけ保存されます。</p>' +
+      '<p class="muted" style="margin:0 0 6px">CPUの押し引きの数値は調整済みです。このページでは、さらにあなたの傾向(リーチ時の和了率)を記録して、あなたのリーチへの警戒度を調整します。記録はこのブラウザにだけ保存されます。</p>' +
       '<div class="row"><label><input type="checkbox" id="set-learn"' + (settings.learn ? ' checked' : '') + '> CPUがあなたの傾向に合わせて調整する</label></div>' +
       '<table class="prof"><tbody>' +
       '<tr><td>記録した局数</td><td>' + p.hands + '局</td></tr>' +
@@ -3708,16 +3708,16 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
   // ---- admin: CPU self-learning (the CPU that every player faces is shared, so the learned values live on the server) ----
   var cpuInfo = null, cpuTrain = null;
   function cpuParamDoc(o, info) {
-    return { fields: { prm: toFS(JSON.stringify(o.prm)), cfg: toFS(JSON.stringify(o.cfg)), gen: toFS(info.gen | 0), hanchan: toFS(info.hanchan | 0), diff: toFS(+info.diff || 0), updated: toFS(new Date()) } };
+    return { fields: { a: toFS(JSON.stringify(o.prm)), b: toFS(JSON.stringify(o.cfg)), c: toFS(info.gen | 0), d: toFS(info.hanchan | 0), e: toFS(+info.diff || 0), t: toFS(new Date()) } };
   }
   function cpuFromDoc(d) {
     if (!d) return null;
-    var x = docObj(d), o; try { o = MJ.Learn.sane({ prm: JSON.parse(x.prm), cfg: JSON.parse(x.cfg) }); } catch (e) { return null; }
-    return o ? { o: o, gen: x.gen | 0, hanchan: x.hanchan | 0, diff: +x.diff || 0, updated: x.updated || '' } : null;
+    var x = docObj(d), o; try { o = MJ.Learn.sane({ prm: JSON.parse(x.a), cfg: JSON.parse(x.b) }); } catch (e) { return null; }
+    return o ? { o: o, gen: x.c | 0, hanchan: x.d | 0, diff: +x.e || 0, updated: x.t || '' } : null;
   }
   function loadCpuParams() {   // everybody (logged in or not) gets the learned CPU at start-up
     if (!bkReady()) return Promise.resolve();
-    return fsCall('GET', '/cpu/params', null, true).then(function (d) { var r = cpuFromDoc(d); if (r && MJ.Learn.applyLearned(r.o)) cpuInfo = r; }).catch(function () { });
+    return fsCall('GET', '/cfg/a', null, true).then(function (d) { var r = cpuFromDoc(d); if (r && MJ.Learn.applyLearned(r.o)) cpuInfo = r; }).catch(function () { });
   }
   function cpuHTML(msg) {
     var i = cpuInfo;
@@ -3737,8 +3737,8 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     if (!bkReady()) return Promise.resolve('local');
     if (!session) return Promise.reject({ code: 'invalid_session' });
     var prev = cpuInfo;
-    var pr = prev ? fsCall('PATCH', '/cpu/prev', cpuParamDoc(prev.o, prev)) : Promise.resolve();
-    return pr.then(function () { return fsCall('PATCH', '/cpu/params', cpuParamDoc(o, { gen: gen, hanchan: hanchan, diff: diff })); }).then(function () { return 'server'; });
+    var pr = prev ? fsCall('PATCH', '/cfg/b', cpuParamDoc(prev.o, prev)) : Promise.resolve();
+    return pr.then(function () { return fsCall('PATCH', '/cfg/a', cpuParamDoc(o, { gen: gen, hanchan: hanchan, diff: diff })); }).then(function () { return 'server'; });
   }
   function yieldNow() {   // MessageChannel is not throttled like setTimeout in background tabs
     return new Promise(function (res) { try { var c = new MessageChannel(); c.port1.onmessage = function () { res(); }; c.port2.postMessage(0); } catch (e) { setTimeout(res, 0); } });
@@ -3775,11 +3775,11 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     try {
       var o, gen = 0, hc = 0, diff = 0;
       if (kind === 'undo') {
-        var d = bkReady() ? await fsCall('GET', '/cpu/prev', null, true) : null, p = cpuFromDoc(d);
+        var d = bkReady() ? await fsCall('GET', '/cfg/b', null, true) : null, p = cpuFromDoc(d);
         if (!p) { showModal(cpuHTML('ひとつ前の記録がありません。')); return; }
         o = p.o; gen = p.gen; hc = p.hanchan; diff = p.diff;
       } else o = { prm: MJ.AI.TUNED0, cfg: MJ.AI.TUNED_CFG0 };
-      if (bkReady()) { if (!session) { showModal(cpuHTML('保存にはログインが必要です。')); return; } await fsCall('PATCH', '/cpu/params', cpuParamDoc(MJ.Learn.sane(o), { gen: gen, hanchan: hc, diff: diff })); }
+      if (bkReady()) { if (!session) { showModal(cpuHTML('保存にはログインが必要です。')); return; } await fsCall('PATCH', '/cfg/a', cpuParamDoc(MJ.Learn.sane(o), { gen: gen, hanchan: hc, diff: diff })); }
       MJ.Learn.applyLearned(o);
       cpuInfo = kind === 'reset' ? null : { o: MJ.Learn.sane(o), gen: gen, hanchan: hc, diff: diff, updated: new Date().toISOString() };
       showModal(cpuHTML(kind === 'undo' ? 'ひとつ前の状態に戻しました。' : '標準のCPUに戻しました。'));
