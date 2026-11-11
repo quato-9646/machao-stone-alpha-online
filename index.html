@@ -371,6 +371,20 @@ td .vr,h3 .vr{font-size:11px;margin-left:0}
 .cutin .ci-ach{margin-top:14px;display:inline-block;padding:6px 16px;border-radius:20px;background:rgba(0,0,0,.65);font-size:clamp(13px,3.6vw,20px);font-weight:700;animation:ciin .4s 1.1s both;text-shadow:none}
 @media (prefers-reduced-motion: reduce){.cutin *{animation:none!important}}
 .tp-row{margin:6px 0}.tp-wait{font-size:13px;margin-top:2px}
+/* fever riichi */
+.btn.fever{background:linear-gradient(100deg,#ff2a6d,#ff9a1f,#ffe91f,#37e06b,#27c7ff,#7b5cff);background-size:250% 100%;color:#111;font-weight:800;animation:fvbtn 1.6s linear infinite;border:0;text-shadow:0 1px 0 rgba(255,255,255,.5)}
+.btn.fever.on{outline:3px solid #fff;box-shadow:0 0 14px #ffe91f}
+@keyframes fvbtn{to{background-position:250% 0}}
+.kv.fev{background:linear-gradient(100deg,#ff2a6d,#ffb21f);color:#fff;border-radius:10px;padding:0 10px;font-weight:800;letter-spacing:.08em;animation:fvpulse .7s ease-in-out infinite alternate}
+@keyframes fvpulse{from{box-shadow:0 0 4px #ff2a6d}to{box-shadow:0 0 16px #ffe91f}}
+body.fever-on{animation:fvbg 2.4s linear infinite}
+body.fever-on #app{box-shadow:inset 0 0 70px rgba(255,60,160,.45),inset 0 0 140px rgba(255,220,30,.25)}
+@keyframes fvbg{0%{filter:hue-rotate(0deg) saturate(1.15)}100%{filter:hue-rotate(360deg) saturate(1.15)}}
+@media (prefers-reduced-motion: reduce){body.fever-on,.btn.fever,.kv.fev{animation:none}}
+body.m-dopa { --bg: #f3e4ef; --felt: #6a2a5c; --felt-d: #43163b; --felt-l: #8a3c78; }
+body.m-dopadopa { --bg: #e3e0f5; --felt: #2a2f7a; --felt-d: #151a4d; --felt-l: #4a3ca0; }
+@media (prefers-color-scheme: dark) { body.m-dopa { --bg: #1d0f1a; } body.m-dopadopa { --bg: #0d0f26; } }
+html, body { touch-action: manipulation; }
 </style>
 <div id="app">
   <header class="top">
@@ -456,8 +470,9 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? module.exports : (w
   }
 
   // ---------- Tile set ----------
-  function buildTiles() {
-    var tiles = [], id = 0;
+  function buildTiles(mode, rng) {
+    // mode: 'normal' | 'dopa' (one extra random gem per kind, 3 pochi haku) | 'dopadopa' (two per kind, 4 pochi haku)
+    var tiles = [], id = 0, pochiN = mode === 'dopadopa' ? 4 : mode === 'dopa' ? 3 : 2, gemsPer = mode === 'dopadopa' ? 2 : mode === 'dopa' ? 1 : 0;
     function add(t, props) {
       var o = { id: id++, t: t, red: false, gem: null, pochi: false };
       if (props) for (var k in props) o[k] = props[k];
@@ -471,9 +486,20 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? module.exports : (w
       for (k = 0; k < 4; k++) add(t);
     }
     [27, 28, 29, 32, 33].forEach(function (tt) { for (var i = 0; i < 4; i++) add(tt); });
-    for (k = 0; k < 4; k++) add(HAKU, { pochi: k < 2 });
+    for (k = 0; k < 4; k++) add(HAKU, { pochi: k < pochiN });
     add(NORTH, { gem: 'amethyst' }); add(NORTH, { gem: 'turquoise' }); add(NORTH, { red: true }); add(NORTH, { red: true });
     for (t = 34; t <= 37; t++) add(t);
+    if (gemsPer) {   // every kind that does not already carry the 5-tile jewels gets random jewels (a fresh draw every hand)
+      var gk = Object.keys(GEMS), rnd = rng || Math.random;
+      for (t = 0; t < 34; t++) {
+        if (t === 13 || t === 22 || t === NORTH) continue;
+        var cand = tiles.filter(function (x) { return x.t === t && !x.pochi && !x.red && !x.gem; });
+        for (var q = 0; q < gemsPer && cand.length; q++) {
+          var ci = Math.floor(rnd() * cand.length), tl = cand.splice(ci, 1)[0];
+          tl.gem = gk[Math.floor(rnd() * gk.length)];
+        }
+      }
+    }
     return tiles;
   }
 
@@ -672,16 +698,16 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
   // ---------- base points ----------
   var TIER_NAMES = ['', '満貫', '跳満', '倍満', '三倍満', '数え役満'];
   var TIER_BASE = [0, 2000, 3000, 4000, 6000, 8000];
-  function tierOf(han, raw) {
-    if (han >= 13) return 5; if (han >= 11) return 4; if (han >= 8) return 3; if (han >= 6) return 2;
+  function tierOf(han, raw, kz) {
+    if (han >= (kz || 13)) return 5; if (han >= 11) return 4; if (han >= 8) return 3; if (han >= 6) return 2;
     if (han >= 5 || raw >= 2000) return 1; return 0;
   }
-  function calcBase(han, fu, yakuman, summer) {
+  function calcBase(han, fu, yakuman, summer, kz) {
     if (yakuman) return { base: 8000, tier: '役満', t: 6 };
     var raw = fu * Math.pow(2, han + 2);
-    var t = tierOf(han, raw);
+    var t = tierOf(han, raw, kz);
     if (summer) {
-      if (t === 0) { han += 1; raw = fu * Math.pow(2, han + 2); t = tierOf(han, raw); }
+      if (t === 0) { han += 1; raw = fu * Math.pow(2, han + 2); t = tierOf(han, raw, kz); }
       else if (t < 5) t += 1;
     }
     if (t === 0) return { base: raw, tier: '', t: 0, han: han };
@@ -733,8 +759,8 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     nuki.forEach(function (t) { if (t.t >= 34) fl[t.t] = true; });
     omote.concat(ura).forEach(function (t) { if (t.t >= 34) fl[t.t] = true; });
     var gemOwned = {}, gemEff = {};
-    all.concat(nuki).forEach(function (t) { if (t.gem) { gemOwned[t.gem] = true; gemEff[t.gem] = true; } });
-    omote.concat(ura).forEach(function (t) { if (t.gem) gemEff[t.gem] = true; });
+    all.concat(nuki).forEach(function (t) { if (t.gem) { gemOwned[t.gem] = true; gemEff[t.gem] = (gemEff[t.gem] || 0) + 1; } });
+    omote.concat(ura).forEach(function (t) { if (t.gem) gemEff[t.gem] = (gemEff[t.gem] || 0) + 1; });
     var summer = !!fl[35];
 
     // ----- dora -----
@@ -764,7 +790,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       if (!r) return;
       var han = r.yakuHan + doraHan;
       var fu = r.fu;
-      var bp = calcBase(han, fu, r.yakuman.length > 0, summer);
+      var bp = calcBase(han, fu, r.yakuman.length > 0, summer, ctx.kazoeMin);
       var key = bp.base * 1000 + han;
       if (!best || key > best.key) best = { key: key, r: r, han: han, fu: fu, bp: bp };
     }
@@ -814,7 +840,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     if (summer && !yakumanFlag) res.summerNote = true;
     res.chips = computeChips(ctx, r.form, { all: all, nuki: nuki, allCounts: allCounts, fl: fl, gemOwned: gemOwned, gemEff: gemEff,
       doraUra: doraUra, riichi: riichi, omote: omote, ura: ura, yakuNames: yakuList.map(function (y) { return y.n; }), yakuman: r.yakuman.length > 0,
-      kazoe: (!yakumanFlag && bp.t === 5) ? (tierOf(best.han, 0) >= 5 ? 'pure' : 'summer') : null });   // the open-riichi payment 'yakuman' gets no chips
+      kazoe: (!yakumanFlag && bp.t === 5) ? (tierOf(best.han, 0, ctx.kazoeMin) >= 5 ? 'pure' : 'summer') : null });   // the open-riichi payment 'yakuman' gets no chips
     return res;
 
     // ----- inner evaluators -----
@@ -1029,13 +1055,13 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     var g = e.gemEff;
     if (g.kunzite) {
       var yc = 0; all.concat(nuki).forEach(function (t) { if (isYaochu(t.t)) yc++; });
-      add('クンツァイト(幺九牌' + yc + '枚・抜き北含む)', yc);
+      add('クンツァイト(幺九牌' + yc + '枚・抜き北含む)' + (g.kunzite > 1 ? '×' + g.kunzite : ''), yc * g.kunzite);
     }
     if (g.tourmaline) {
       var sc = Math.abs(ctx.score | 0), best = 0;
       if (sc === 0) best = 5;
       else String(sc).split('').forEach(function (ch) { var v = +ch; if (v > best) best = v; });
-      add('トルマリン(点数の数字)', best);
+      add('トルマリン(点数の数字)' + (g.tourmaline > 1 ? '×' + g.tourmaline : ''), best * g.tourmaline);
     }
     if (g.garnet) {
       // every dora indicator on the table counts, including the new ones revealed by kans
@@ -1046,11 +1072,11 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
         else { var dt = nextDora(ind.t); v += isHonor(dt) ? 3 : numOf(dt); }
       });
       if (flowerInd) v = 0;
-      add(flowerInd ? 'ガーネット(表示牌に花牌: 0枚)' : 'ガーネット(ドラの数)', v);
+      add(flowerInd ? 'ガーネット(表示牌に花牌: 0枚)' : 'ガーネット(ドラの数)' + (g.garnet > 1 ? '×' + g.garnet : ''), v * g.garnet);
     }
     if (g.ruby) {
       var wn = ctx.winTile.t, rv = isHonor(wn) ? 1 : numOf(wn);
-      add('ルビー(和了牌の数)', rv);
+      add('ルビー(和了牌の数)' + (g.ruby > 1 ? '×' + g.ruby : ''), rv * g.ruby);
     }
     // flowers
     if (e.fl[34]) {
@@ -1108,8 +1134,8 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     if (e.yakuman) { add('役満', 5); add('役満(20面サイコロ)', D.d20()); }
     else if (e.kazoe === 'pure') add('数え役満(祝儀)', 5);
     else if (e.kazoe === 'summer') add('数え役満(夏の効果で昇格・祝儀)', 3);
-    var mult = e.gemEff.amethyst ? 2 : 1;
-    if (mult === 2) { items.push({ label: 'アメジスト(祝儀2倍)', n: total, mult: true }); total *= 2; }
+    var mult = e.gemEff.amethyst ? 1 + e.gemEff.amethyst : 1;
+    if (mult >= 2) { items.push({ label: 'アメジスト(祝儀' + mult + '倍)', n: total * (mult - 1), mult: true, m: mult }); total *= mult; }
     return { total: total, items: items, rolls: D.rolls };
   }
 
@@ -1132,6 +1158,7 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
     opts = opts || {};
     this.rng = opts.rng || Math.random;
     this.expectDice = !!opts.expectDice;
+    this.mode = opts.mode || 'normal';
     this.names = opts.names || ['あなた', 'CPU-A', 'CPU-B'];
     this.P = [0, 1, 2].map(function (i) { return { name: (opts.names || ['あなた', 'CPU-A', 'CPU-B'])[i], score: 35000, chips: 0 }; });
     this.roundWind = 0; this.kyoku = 0; this.dealer = 0; this.honba = 0; this.kyotaku = 0; this.handNo = 0;
@@ -1180,7 +1207,7 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
 
   // ---------- hand setup ----------
   G.startHand = function (preset) {
-    var tiles = preset ? preset.slice() : MJ.shuffle(MJ.buildTiles(), this.rng);
+    var tiles = preset ? preset.slice() : MJ.shuffle(MJ.buildTiles(this.mode, this.rng), this.rng);
     var dead = tiles.slice(tiles.length - 14);
     var wall = tiles.slice(0, tiles.length - 14);
     var h = this.h = {
@@ -1189,7 +1216,7 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
       discT: [new Int8Array(34), new Int8Array(34), new Int8Array(34)],
       rii: [null, null, null], fur: [{ temp: false, perm: false }, { temp: false, perm: false }, { temp: false, perm: false }],
       chiUsed: [0, 0, 0], noCall: true, phase: 'DRAW', cur: this.dealer, drawn: null, rinshan: false,
-      last: null, pendRii: null, calls: null, waits: [null, null, null], sh: [9, 9, 9], res: null, all: tiles
+      last: null, pendRii: null, calls: null, waits: [null, null, null], sh: [9, 9, 9], res: null, all: tiles, fever: null
     };
     this.handNo++;
     var k, s;
@@ -1261,6 +1288,7 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
       chiihou: tsumo && seat !== this.dealer && firstGo && !h.rinshan,
       omoteInds: this.omoteInds(), uraInds: flags.preview ? [] : this.uraInds(), score: this.P[seat].score,
       flip: flags.preview ? [] : this.flipStacks(), rng: this.rng, expect: flags.preview ? true : this.expectDice,
+      kazoeMin: this.mode === 'dopadopa' ? 17 : this.mode === 'dopa' ? 15 : 13,
       openRiichiYakuman: !tsumo && !!(rii && rii.open) && flags.from !== undefined && !h.rii[flags.from]
     };
     var ev = MJ.evaluateWin(ctx);
@@ -1307,10 +1335,11 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
           var c = h.calls;
           if (c.stage === 'ron') {
             if (c.qi < c.queue.length) return { kind: 'call', stage: 'ron', seat: c.queue[c.qi], tile: c.tile, from: c.from };
-            if (c.ronners.length) { this.resolveRon(c); return { kind: 'end' }; }
+            if (c.ronners.length) { this.resolveRon(c); if (h.phase === 'END') return { kind: 'end' }; continue; }
             if (c.kind === 'chankan') { this.completeKakan(); continue; }
             if (c.kind === 'nuki') { h.phase = 'TURN'; h.calls = null; this.completeNuki(c.from); if (h.phase === 'END') return { kind: 'end' }; continue; }
             this.finalizeRiichi();
+            if (h.phase === 'END') return { kind: 'end' };
             c.stage = 'meld'; c.mq = this.makeMeldQueue(c.tile, c.from); c.qi = 0;
           }
           if (c.stage === 'meld') {
@@ -1332,8 +1361,71 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
     throw new Error('respond in phase ' + h.phase);
   };
 
+  // ---------- fever riichi ----------
+  // 7p / 7s held as a closed triplet (or ankan) in a closed hand, at the moment of declaring riichi: fever (one suit) / double fever (both suits)
+  G.feverLevelAfter = function (seat, id) {
+    var h = this.h;
+    if (!this.isMenzen(seat) || h.fever) return 0;
+    var c = countsOf(h.hands[seat]), i, tt = -1;
+    for (i = 0; i < h.hands[seat].length; i++) if (h.hands[seat][i].id === id) { tt = h.hands[seat][i].t; break; }
+    if (tt < 0) return 0;
+    c[tt]--;
+    var kan = {};
+    h.melds[seat].forEach(function (m) { if (m.kind === 'ankan') kan[m.tiles[0].t] = (kan[m.tiles[0].t] || 0) + 4; });
+    return [15, 24].filter(function (t) { return c[t] + (kan[t] || 0) >= 3; }).length;
+  };
+  G.feverOptions = function (seat) {
+    var self = this;
+    if (this.h.fever || this.h.rii[seat]) return [];
+    return this.riichiDiscards(seat).map(function (id) { return { id: id, level: self.feverLevelAfter(seat, id) }; }).filter(function (x) { return x.level > 0; });
+  };
+  // how many of the fever player's winning tiles are still in the live wall (the dead wall and the other hands can never come out)
+  G.feverWaitsLeft = function () {
+    var h = this.h, f = h.fever, w = h.waits[f.seat], n = 0;
+    if (!w) return 0;
+    for (var i = h.wp; i < h.wend; i++) if (w[h.wall[i].t]) n++;
+    return n;
+  };
+  G.startFever = function (seat, level) {
+    var h = this.h;
+    h.fever = { seat: seat, level: level, need: level, list: [], won: [] };
+    this.emit('fever', { seat: seat, level: level });
+    if (this.feverWaitsLeft() === 0) this.endExhaustive();   // nothing left to win on: the hand is drawn at once
+  };
+  G.feverInfo = function () { var f = this.h.fever; return f ? { seat: f.seat, level: f.level, need: f.need, n: f.list.length } : null; };
+  G.finishFever = function () {
+    var f = this.h.fever, list = f.list;
+    this.finishWins(list, list[0].tsumo ? 'tsumo' : 'ron');
+    this.h.res.fever = this.feverInfo();
+  };
+  // the fever player won: score it later (all wins are settled together); continue if a second win is needed and still possible
+  G.feverWin = function (w, ronCall) {
+    var h = this.h, f = h.fever;
+    f.list.push(w);
+    this.emit('feverwin', { seat: f.seat, n: f.list.length, need: f.need });
+    if (f.list.length >= f.need) { this.finishFever(); return; }
+    if (w.tsumo) {
+      var ix = this.findInHand(f.seat, w.tile.id);
+      if (ix >= 0) f.won.push(h.hands[f.seat].splice(ix, 1)[0]);
+      h.drawn = null; h.rinshan = false;
+      this.refreshWaits(f.seat);
+      h.cur = (f.seat + 1) % 3;
+    } else { h.calls = null; h.cur = (ronCall.from + 1) % 3; }
+    h.phase = 'DRAW';
+    if (this.feverWaitsLeft() === 0 || this.rem() <= 0) this.finishFever();
+  };
+
   // ---------- turn options ----------
   G.turnOptions = function (seat) {
+    if (this.h.fever && seat !== this.h.fever.seat) {   // everybody else is locked to tsumo-giri while a fever is on
+      var hh = this.h;
+      return { tsumo: false, discard: hh.drawn ? [hh.drawn.id] : [], riichi: [], ankan: [], kakan: [], nuki: [], fever: [] };
+    }
+    var o0 = this.turnOptions0(seat);
+    o0.fever = this.feverOptions(seat).map(function (x) { return x.id; });
+    return o0;
+  };
+  G.turnOptions0 = function (seat) {
     var h = this.h, hand = h.hands[seat], rii = h.rii[seat];
     var o = { tsumo: false, discard: [], riichi: [], ankan: [], kakan: [], nuki: [] };
     if (this.isWild(seat)) {
@@ -1410,6 +1502,7 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
   // ---------- turn actions ----------
   G.respondTurn = function (r) {
     var h = this.h, seat = h.cur;
+    if (h.fever && seat !== h.fever.seat && h.drawn) r = { act: 'discard', id: h.drawn.id, riichi: 0 };   // forced tsumo-giri
     switch (r.act) {
       case 'tsumo': return this.doTsumo(seat, r.as);
       case 'discard': return this.doDiscard(seat, r.id, r.riichi | 0);
@@ -1455,10 +1548,12 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
       }
       var ww = this.buildWin(seat, true, h.drawn, { as: as });
       if (!ww) throw new Error('invalid wild tsumo');
+      if (h.fever) { this.feverWin(ww); return; }
       this.finishWins([ww], 'tsumo'); return;
     }
     var w = this.buildWin(seat, true, h.drawn);
     if (!w) throw new Error('invalid tsumo');
+    if (h.fever) { this.feverWin(w); return; }
     this.finishWins([w], 'tsumo');
   };
   G.doDiscard = function (seat, id, riichiKind) {
@@ -1466,11 +1561,14 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
     if (idx < 0) throw new Error('tile not in hand');
     var tile = h.hands[seat][idx], rii = h.rii[seat];
     if (rii && h.drawn && tile !== h.drawn) throw new Error('riichi locked');
+    var flv0 = riichiKind === 3 ? this.feverLevelAfter(seat, id) : 0;
     h.hands[seat].splice(idx, 1);
     var pend = null;
     if (riichiKind) {
       if (rii || shanten(countsOf(h.hands[seat]), h.melds[seat].length) !== 0) { h.hands[seat].splice(idx, 0, tile); throw new Error('cannot riichi'); }
-      pend = { seat: seat, open: riichiKind === 2, double: h.noCall && h.disc[seat].length === 0 };
+      var flv = flv0;
+      if (riichiKind === 3 && !flv) { h.hands[seat].splice(idx, 0, tile); throw new Error('no fever'); }
+      pend = { seat: seat, open: riichiKind === 2, double: h.noCall && h.disc[seat].length === 0, fever: flv };
     }
     var entry = { tile: tile, sg: tile === h.drawn, called: false, riichi: !!pend };
     h.disc[seat].push(entry); h.discT[seat][tile.t]++;
@@ -1483,7 +1581,7 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
     this.refreshWaits(seat);
     h.phase = 'CALLS';
     h.calls = this.makeRonStage(tile, seat, 'discard');
-    this.emit('discard', { seat: seat, tile: tile, riichi: pend ? (pend.open ? 2 : 1) : 0 });
+    this.emit('discard', { seat: seat, tile: tile, riichi: pend ? (pend.open ? 2 : 1) : 0, fever: pend ? pend.fever : 0 });
   };
   G.makeRonStage = function (tile, from, kind) {
     var queue = [];
@@ -1496,6 +1594,7 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
   G.canRon = function (seat, tile, from, chankan) {
     var h = this.h, w = h.waits[seat];
     if (!w || !w[tile.t]) return false;
+    if (h.fever && seat !== h.fever.seat) return false;   // during a fever only the fever player can win
     if (this.isFuriten(seat)) return false;
     if (chankan && h.kakan && h.kakan.ankan) {   // robbing an ankan: kokushi only
       var cc = countsOf(h.hands[seat]); cc[tile.t]++;
@@ -1507,10 +1606,11 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
     var h = this.h, p = h.pendRii;
     if (!p) return;
     var chaseOf = []; for (var cq = 0; cq < 3; cq++) if (cq !== p.seat && h.rii[cq]) chaseOf.push(cq);   // players who were already in riichi (this one is a chase riichi)
-    h.rii[p.seat] = { open: p.open, double: p.double, ippatsu: true, idx: h.disc[p.seat].length - 1, chaseOf: chaseOf, drew: false };
+    h.rii[p.seat] = { open: p.open, double: p.double, ippatsu: true, idx: h.disc[p.seat].length - 1, chaseOf: chaseOf, drew: false, fever: p.fever || 0 };
     this.P[p.seat].score -= 1000; this.kyotaku++;
     h.pendRii = null;
-    this.emit('riichi', { seat: p.seat, open: p.open, double: p.double });
+    this.emit('riichi', { seat: p.seat, open: p.open, double: p.double, fever: p.fever || 0 });
+    if (p.fever) this.startFever(p.seat, p.fever);
   };
 
   G.doNuki = function (seat, id) {
@@ -1635,7 +1735,7 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
   };
   G.makeMeldQueue = function (tile, from) {
     var h = this.h, q = [];
-    if (this.rem() <= 0) return q;
+    if (this.rem() <= 0 || h.fever) return q;
     var pk = [], ck = [];
     for (var k = 1; k <= 2; k++) {
       var s = (from + k) % 3;
@@ -1704,6 +1804,7 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
       if (!w) throw new Error('ron became invalid');
       wins.push(w);
     }
+    if (h.fever && wins.length === 1 && wins[0].seat === h.fever.seat) { this.feverWin(wins[0], c); return; }
     this.finishWins(wins, 'ron');
   };
   G.finishWins = function (wins, type) {
@@ -1736,6 +1837,12 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
     this.emit('end', h.res);
   };
   G.endExhaustive = function () {
+    var h = this.h;
+    if (h.fever && h.fever.list.length) { this.finishFever(); return; }   // wins already made in a (double) fever are still paid
+    this.endExhaustive0();
+    if (h.fever && h.res) h.res.fever = this.feverInfo();
+  };
+  G.endExhaustive0 = function () {
     var h = this.h, s, dPts = [0, 0, 0], dCh = [0, 0, 0];
     // nagashi mangan
     var nag = [];
@@ -1809,7 +1916,7 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
 
   // ---------- cloning (for simulation) ----------
   G.clone = function () {
-    var g = new Game({ rng: this.rng, expectDice: this.expectDice, names: this.names });
+    var g = new Game({ rng: this.rng, expectDice: this.expectDice, names: this.names, mode: this.mode });
     g.P = this.P.map(function (p) { return { name: p.name, score: p.score, chips: p.chips }; });
     g.roundWind = this.roundWind; g.kyoku = this.kyoku; g.dealer = this.dealer; g.honba = this.honba; g.kyotaku = this.kyotaku;
     g.handNo = this.handNo; g.over = this.over;
@@ -1821,11 +1928,12 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
       nuki: h.nuki.map(function (a) { return a.slice(); }),
       disc: h.disc.map(function (a) { return a.map(function (e) { return { tile: e.tile, sg: e.sg, called: e.called, riichi: e.riichi }; }); }),
       discT: h.discT.map(function (a) { return new Int8Array(a); }),
-      rii: h.rii.map(function (r) { return r ? { open: r.open, double: r.double, ippatsu: r.ippatsu, idx: r.idx, chaseOf: r.chaseOf, drew: r.drew } : null; }),
+      rii: h.rii.map(function (r) { return r ? { open: r.open, double: r.double, ippatsu: r.ippatsu, idx: r.idx, chaseOf: r.chaseOf, drew: r.drew, fever: r.fever } : null; }),
+      fever: h.fever ? { seat: h.fever.seat, level: h.fever.level, need: h.fever.need, list: h.fever.list.slice(), won: h.fever.won.slice() } : null,
       fur: h.fur.map(function (f) { return { temp: f.temp, perm: f.perm }; }),
       kuikae: h.kuikae ? { seat: h.kuikae.seat, types: h.kuikae.types.slice() } : null,
       chiUsed: h.chiUsed.slice(), noCall: h.noCall, phase: h.phase, cur: h.cur, drawn: h.drawn, rinshan: h.rinshan,
-      last: null, pendRii: h.pendRii ? { seat: h.pendRii.seat, open: h.pendRii.open, double: h.pendRii.double } : null,
+      last: null, pendRii: h.pendRii ? { seat: h.pendRii.seat, open: h.pendRii.open, double: h.pendRii.double, fever: h.pendRii.fever } : null,
       calls: null, waits: h.waits.slice(), sh: h.sh.slice(), res: null, all: h.all,
       kakan: h.kakan ? { seat: h.kakan.seat, tile: h.kakan.tile, meldIndex: h.kakan.meldIndex, ankan: h.kakan.ankan, t: h.kakan.t } : null
     };
@@ -1851,7 +1959,7 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
       hh = Object.assign({}, h);
       hh.last = h.last ? { tile: h.last.tile, seat: h.last.seat, idx: h.disc[h.last.seat].indexOf(h.last.entry) } : null;
     }
-    var st = { P: this.P, roundWind: this.roundWind, kyoku: this.kyoku, dealer: this.dealer, honba: this.honba, kyotaku: this.kyotaku, handNo: this.handNo, over: this.over, h: hh };
+    var st = { P: this.P, mode: this.mode, roundWind: this.roundWind, kyoku: this.kyoku, dealer: this.dealer, honba: this.honba, kyotaku: this.kyotaku, handNo: this.handNo, over: this.over, h: hh };
     return JSON.stringify({ table: table, st: st }, function (k, v) {
       if (v && typeof v === 'object') {
         if (set.has(v)) return { $: v.id };
@@ -1874,6 +1982,7 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
     }
     var st = fix(o.st), g = new Game(opts);
     ['P', 'roundWind', 'kyoku', 'dealer', 'honba', 'kyotaku', 'handNo', 'over'].forEach(function (k) { g[k] = st[k]; });
+    if (st.mode) g.mode = st.mode;
     g.h = st.h;
     if (g.h && g.h.last) { var l = g.h.last; g.h.last = { tile: l.tile, seat: l.seat, entry: g.h.disc[l.seat][l.idx] || { tile: l.tile, sg: false, called: false, riichi: false } }; }
     return g;
@@ -1900,8 +2009,9 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
       h.melds[s].forEach(function (m) { m.tiles.forEach(show); show(m.called); });
       h.nuki[s].forEach(show);
       h.disc[s].forEach(function (e) { show(e.tile); });
-      if (h.rii[s] && h.rii[s].open) h.hands[s].forEach(show);
+      if ((h.rii[s] && h.rii[s].open) || h.fever) h.hands[s].forEach(show);
     }
+    if (h.fever) h.fever.won.forEach(show);
     for (i = 0; i < h.nOmote; i++) show(h.dead[4 + 2 * i]);
     if (h.rii[a] || h.phase === 'END') for (i = 0; i < h.nOmote; i++) show(h.dead[5 + 2 * i]);
     if (h.last) show(h.last.tile);
@@ -1910,12 +2020,14 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
     if (h.res) collect(h.res, 0);
     var hh = Object.assign({}, h);
     ['hands', 'melds', 'nuki', 'disc', 'discT', 'rii', 'fur', 'chiUsed', 'waits', 'sh'].forEach(function (k) { hh[k] = rot(h[k]); });
-    hh.waits = hh.waits.map(function (w, vi) { var abs = (vi + a) % 3; return (abs === a || (h.rii[abs] && h.rii[abs].open)) ? w : null; });
-    hh.sh = hh.sh.map(function (v, vi) { return (vi + a) % 3 === a ? v : 9; });
+    hh.waits = hh.waits.map(function (w, vi) { var abs = (vi + a) % 3; return (abs === a || h.fever || (h.rii[abs] && h.rii[abs].open)) ? w : null; });
+    hh.sh = hh.sh.map(function (v, vi) { return ((vi + a) % 3 === a || h.fever) ? v : 9; });
     hh.melds = hh.melds.map(function (arr) { return arr.map(function (m) { return Object.assign({}, m, { from: ms(m.from) }); }); });
     hh.rii = hh.rii.map(function (r) { return r ? Object.assign({}, r, { chaseOf: (r.chaseOf || []).map(ms) }) : null; });
     hh.cur = ms(h.cur);
-    hh.drawn = h.cur === a ? h.drawn : null;
+    hh.drawn = (h.cur === a || h.fever) ? h.drawn : null;
+    if (h.fever && h.drawn) vis.add(h.drawn);
+    hh.fever = h.fever ? { seat: ms(h.fever.seat), level: h.fever.level, need: h.fever.need, n: h.fever.list.length, won: h.fever.won } : null;
     hh.pendRii = h.pendRii ? Object.assign({}, h.pendRii, { seat: ms(h.pendRii.seat) }) : null;
     hh.kakan = h.kakan ? Object.assign({}, h.kakan, { seat: ms(h.kakan.seat) }) : null;
     hh.kuikae = h.kuikae ? Object.assign({}, h.kuikae, { seat: ms(h.kuikae.seat) }) : null;
@@ -1930,12 +2042,13 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
       if (r.wins) r.wins = r.wins.map(function (w) { return Object.assign({}, w, { seat: ms(w.seat), from: ms(w.from), pts: rot(w.pts), chipsD: rot(w.chipsD) }); });
       if (r.nagashi) r.nagashi = r.nagashi.map(function (n) { return Object.assign({}, n, { seat: ms(n.seat), pts: rot(n.pts), chipsD: rot(n.chipsD) }); });
       if (r.returned) r.returned = r.returned.map(ms);
+      if (r.fever) r.fever = Object.assign({}, r.fever, { seat: ms(r.fever.seat) });
       hh.res = r;
     }
     hh.all = [];
     var table = [];
     vis.forEach(function (t) { table.push(JSON.parse(JSON.stringify(t))); });
-    var st = { P: rot(this.P), roundWind: this.roundWind, kyoku: this.kyoku, dealer: ms(this.dealer), honba: this.honba, kyotaku: this.kyotaku, handNo: this.handNo, over: this.over, h: hh };
+    var st = { P: rot(this.P), mode: this.mode, roundWind: this.roundWind, kyoku: this.kyoku, dealer: ms(this.dealer), honba: this.honba, kyotaku: this.kyotaku, handNo: this.handNo, over: this.over, h: hh };
     var rq = null;
     if (req) {
       rq = Object.assign({}, req);
@@ -1966,6 +2079,7 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
     }
     var st = fix(o.st), g = new Game(opts);
     ['P', 'roundWind', 'kyoku', 'dealer', 'honba', 'kyotaku', 'handNo', 'over'].forEach(function (k) { g[k] = st[k]; });
+    if (st.mode) g.mode = st.mode;
     g.h = st.h;
     if (o.deck) g.h.all = o.deck.map(function (d) { return { id: d[0], t: d[1], red: !!d[2], gem: d[3] || null, pochi: !!d[4] }; });
     if (g.h.last) { var l = g.h.last; g.h.last = { tile: l.tile, seat: l.seat, entry: g.h.disc[l.seat][l.idx] || { tile: l.tile, sg: false, called: false, riichi: false } }; }
@@ -2225,9 +2339,23 @@ if (typeof module !== 'undefined' && module.exports) { require('./score.js'); re
     return n >= 10;
   }
 
+  // fever riichi is strictly better than any other riichi (nobody else can win, and the fever player cannot deal in), so the CPU always takes it
+  function feverResp(g, seat) {
+    var fo = g.feverOptions(seat);
+    if (!fo.length) return null;
+    var h = g.h, best = null;
+    fo.forEach(function (x) {
+      var hand = h.hands[seat].filter(function (t) { return t.id !== x.id; }), c = countsOf(hand), w = waitTypes(c, h.melds[seat].length), left = 0;
+      for (var i = h.wp; i < h.wend; i++) if (w.indexOf(h.wall[i].t) >= 0) left++;
+      var sc = x.level * 1000 + left;
+      if (!best || sc > best.sc) best = { id: x.id, sc: sc };
+    });
+    return { act: 'discard', id: best.id, riichi: 3 };
+  }
   function quickTurn(g, seat, cfg, full) {
     PRM = (cfg && cfg.prm) || PRM_BASE;
     var h = g.h, hand = h.hands[seat], rii = h.rii[seat], drawn = h.drawn;
+    if (h.fever && seat !== h.fever.seat) return drawn ? { act: 'discard', id: drawn.id, riichi: 0 } : { act: 'pass' };
     if (canTsumo(g, seat)) return { act: 'tsumo' };
     var i;
     if (g.rem() >= 2 && (rii || !keepFor13(hand))) for (i = 0; i < hand.length; i++) if (hand[i].t === 30 && (!rii || hand[i] === drawn)) return { act: 'nuki', id: hand[i].id };
@@ -2237,7 +2365,7 @@ if (typeof module !== 'undefined' && module.exports) { require('./score.js'); re
         if (ak.length) return { act: 'ankan', t: ak[0] };
         return { act: 'discard', id: drawn.id, riichi: 0 };
       }
-    }
+    } else { var fv0 = feverResp(g, seat); if (fv0) return fv0; }
     var ev = evalDiscards(g, seat, full);
     var dora = doraTypeCounts(g);
     var danger = dangerTable(g, seat, cfg);
@@ -2325,14 +2453,14 @@ if (typeof module !== 'undefined' && module.exports) { require('./score.js'); re
       h.melds[s].forEach(function (m) { m.tiles.forEach(mark); });
       h.nuki[s].forEach(mark);
       h.disc[s].forEach(function (e) { mark(e.tile); });
-      if (s !== seat && h.rii[s] && h.rii[s].open) h.hands[s].forEach(mark);
+      if (s !== seat && ((h.rii[s] && h.rii[s].open) || h.fever)) h.hands[s].forEach(mark);
     }
     g.omoteInds().forEach(mark);
     var unseen = h.all.filter(function (t) { return !seen[t.id]; });
     var opp = [];
     for (s = 0; s < 3; s++) {
       if (s === seat) continue;
-      var open = h.rii[s] && h.rii[s].open;
+      var open = (h.rii[s] && h.rii[s].open) || !!h.fever;
       opp.push({ seat: s, size: 13 - 3 * h.melds[s].length, open: !!open, cycles: Math.min(11, h.disc[s].length) });
     }
     return { unseen: unseen, opp: opp, dora: doraTypeCounts(g) };
@@ -2580,6 +2708,7 @@ if (typeof module !== 'undefined' && module.exports) { require('./score.js'); re
       return { cands: cands };
     }
     var rii = h.rii[seat], drawn = h.drawn;
+    if (h.fever && seat !== h.fever.seat) return { resp: drawn ? { act: 'discard', id: drawn.id, riichi: 0 } : { act: 'pass' } };
     if (canTsumo(g, seat)) return { resp: { act: 'tsumo' } };
     var hand = h.hands[seat], i;
     if (g.rem() >= 2 && (rii || !keepFor13(hand))) for (i = 0; i < hand.length; i++) if (hand[i].t === 30 && (!rii || hand[i] === drawn)) return { resp: { act: 'nuki', id: hand[i].id } };
@@ -2588,6 +2717,7 @@ if (typeof module !== 'undefined' && module.exports) { require('./score.js'); re
       if (ak.length) return { resp: { act: 'ankan', t: ak[0] } };
       return { resp: { act: 'discard', id: drawn.id, riichi: 0 } };
     }
+    var fv1 = feverResp(g, seat); if (fv1) return { resp: fv1 };
     var baseT = quickTurn(g, seat, cfg.policy, true);
     if (baseT.act !== 'discard') return { resp: baseT };
     var cands2 = cfg.noMC ? [] : turnCandidates(g, seat, baseT, cfg);
@@ -2863,7 +2993,8 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
   // ---------- player profile (the CPUs adapt to how you play; stored only in this browser) ----------
   var PROF_KEY = 'mj-profile-v1';
   function blankProfile() { return { hands: 0, riichi: 0, riichiWin: 0, wins: 0, dealIn: 0, calls: 0, underRiichi: 0, safeUnder: 0, discards: 0, chipDiscards: 0, nuki: 0, openRiichi: 0, tsumo: 0, winChips: 0, winPts: 0 }; }
-  function tally(k, v) { profile[k] = (profile[k] || 0) + v; if (typeof matchStats !== 'undefined' && matchStats) matchStats[k] = (matchStats[k] || 0) + v; }
+  function isDopa() { return !!(game && game.mode && game.mode !== 'normal'); }
+  function tally(k, v) { if (isDopa()) return; profile[k] = (profile[k] || 0) + v; if (typeof matchStats !== 'undefined' && matchStats) matchStats[k] = (matchStats[k] || 0) + v; }
   var profile = blankProfile();
   try { var praw = localStorage.getItem(PROF_KEY); if (praw) { var pp = JSON.parse(praw); if (pp && typeof pp.hands === 'number') Object.assign(profile, pp); } } catch (e) { }
   function saveProfile() { try { localStorage.setItem(PROF_KEY, JSON.stringify(profile)); } catch (e) { } }
@@ -2882,7 +3013,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     if (mine) {
       tally('wins', 1); if (h.rii[0]) tally('riichiWin', 1); if (mine.tsumo) tally('tsumo', 1);
       var ch = Math.max(0, res.dChips[0] || 0); tally('winChips', ch); tally('winPts', Math.max(0, res.dPts[0] || 0));
-      if (ch > 0) matchWins.push({ chips: ch, note: winNote(mine), snap: winSnap(mine) });
+      if (ch > 0 && !isDopa()) matchWins.push({ chips: ch, note: winNote(mine), snap: winSnap(mine) });
       if (mine.ev && mine.ev.isYakuman) { try { submitYakuman(mine, ch); } catch (e) { } }
     }
     if (res.wins && res.wins.some(function (w) { return !w.tsumo && w.from === 0; })) tally('dealIn', 1);
@@ -3013,6 +3144,10 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     else if (kind === 'big') {          // fanfare for san-baiman and above
       tone(ac, 110, 40, t, 0.7, 'sine', 0.9);
       [523, 659, 784, 1047, 1319].forEach(function (f, i) { tone(ac, f, f, t + 0.1 + i * 0.11, 0.5, 'triangle', 0.22); tone(ac, f / 2, f / 2, t + 0.1 + i * 0.11, 0.5, 'square', 0.06); });
+    } else if (kind === 'fever') {      // bright rising fanfare with a siren sweep
+      tone(ac, 130, 40, t, 0.6, 'sine', 0.9);
+      [523, 659, 784, 1047, 1319, 1568].forEach(function (f, i) { tone(ac, f, f, t + 0.05 + i * 0.07, 0.35, 'square', 0.1); tone(ac, f * 2, f * 2, t + 0.05 + i * 0.07, 0.25, 'triangle', 0.08); });
+      tone(ac, 300, 1800, t + 0.45, 0.9, 'sawtooth', 0.07);
     } else if (kind === 'tick') { tone(ac, 500 + Math.random() * 500, 300, t, 0.05, 'square', 0.07); }
     else if (kind === 'land') { tone(ac, 220, 60, t, 0.3, 'sine', 0.8); tone(ac, 880, 1320, t + 0.05, 0.35, 'triangle', 0.2); }
   }
@@ -3108,7 +3243,10 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     if (S.fast || !settings.sound) return true;
     try { var a = new Audio(CUTIN_SND[id]); a.volume = 1; var p = a.play(); if (p && p.catch) p.catch(function () { }); return true; } catch (e) { return false; }
   }
-  function cutinKind(gain) { for (var i = 0; i < CUTINS.length; i++) if (gain >= CUTINS[i].min) return CUTINS[i]; return null; }
+  function cutinKind(gain) {   // ドパ x2, ドパドパ x3 thresholds
+    var m = game && game.mode === 'dopadopa' ? 3 : game && game.mode === 'dopa' ? 2 : 1;
+    for (var i = 0; i < CUTINS.length; i++) if (gain >= CUTINS[i].min * m) return CUTINS[i]; return null;
+  }
   function cutinFx(w, c, gain, first) {
     var html = '<div class="ci-bg"></div><div class="ci-stripes"></div><div class="ci-flash"></div>' + (c.id === 'rainbow' && !REDUCED ? confettiHTML(60) : '') +
       '<div class="ci-body"><div class="ci-who">' + esc(NAMES[w.seat]) + (w.tsumo ? ' ツモ' : ' ロン') + '</div><div class="ci-gain">+' + gain + '<small>枚</small></div>' +
@@ -3133,15 +3271,114 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     return q.reduce(function (p, f) { return p.then(f); }, Promise.resolve());
   }
 
+
+  // ---------- fever riichi: cut-in, BGM, forced tsumo-giri ----------
+  var FEVER_SE = null;   // data: URL of the declaration sound effect (when supplied); otherwise a synthesised jingle is used
+  function feverCutin(d) {
+    var dbl = d.level > 1;
+    logLine(pname(d.seat) + ': ' + (dbl ? 'ダブルフィーバーリーチ!' : 'フィーバーリーチ!'));
+    if (S.fast) return;
+    var html = '<div class="ci-bg"></div><div class="ci-stripes"></div><div class="ci-flash"></div>' + (REDUCED ? '' : confettiHTML(70)) +
+      '<div class="ci-body"><div class="ci-who">' + esc(NAMES[d.seat]) + '</div><div class="ci-gain" style="font-size:clamp(46px,' + (dbl ? 15 : 19) + 'vw,' + (dbl ? 120 : 150) + 'px)">' + (dbl ? 'DOUBLE<br>FEVER!!' : 'FEVER!!') + '</div>' +
+      '<div class="ci-line">' + (dbl ? 'ダブルフィーバーリーチ' : 'フィーバーリーチ') + '</div></div>';
+    if (FEVER_SE && settings.sound) { try { var a = new Audio(FEVER_SE); a.volume = 1; var p = a.play(); if (p && p.catch) p.catch(function () { }); } catch (e) { } }
+    else sfx('fever');
+    fxOverlay('cutin rainbow', html, REDUCED ? 1500 : (dbl ? 3200 : 2600));
+  }
+  // BGM: a synthesised loop (four-on-the-floor kick, off-beat hats, driving bass, arpeggio lead), scheduled a little ahead of the clock
+  var BGM = { on: false, timer: null, next: 0, step: 0, master: null, level: 1, noise: null };
+  function bgmNoise(ac) {
+    if (BGM.noise) return BGM.noise;
+    var len = ac.sampleRate * 0.5, b = ac.createBuffer(1, len, ac.sampleRate), d = b.getChannelData(0);
+    for (var i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    return (BGM.noise = b);
+  }
+  function bgmVoice(ac, f, t, dur, type, vol, dest) {
+    var o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(dest); o.start(t); o.stop(t + dur + 0.03);
+  }
+  function bgmHit(ac, t, kind, dest) {
+    if (kind === 'kick') {
+      var o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(170, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.14);
+      g.gain.setValueAtTime(1, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+      o.connect(g); g.connect(dest); o.start(t); o.stop(t + 0.22);
+    } else {
+      var n = ac.createBufferSource(), f = ac.createBiquadFilter(), g2 = ac.createGain();
+      n.buffer = bgmNoise(ac); f.type = kind === 'hat' ? 'highpass' : 'bandpass'; f.frequency.value = kind === 'hat' ? 7500 : 1800;
+      g2.gain.setValueAtTime(kind === 'hat' ? 0.22 : 0.55, t); g2.gain.exponentialRampToValueAtTime(0.001, t + (kind === 'hat' ? 0.05 : 0.17));
+      n.connect(f); f.connect(g2); g2.connect(dest); n.start(t); n.stop(t + 0.2);
+    }
+  }
+  // C - G - Am - F, two bars each, 16 steps per bar
+  var BGM_PROG = [[48, [0, 4, 7]], [43, [0, 4, 7]], [45, [0, 3, 7]], [41, [0, 4, 7]]];
+  function mtof(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+  function bgmStep(ac, t, st) {
+    var bar = Math.floor(st / 16) % 8, sp = st % 16, ch = BGM_PROG[Math.floor(bar / 2)], root = ch[0], tones = ch[1], m = BGM.master, lv = BGM.level;
+    if (sp % 4 === 0) bgmHit(ac, t, 'kick', m);
+    if (sp === 4 || sp === 12) bgmHit(ac, t, 'snare', m);
+    if (sp % 2 === 0 && sp % 4 !== 0) bgmHit(ac, t, 'hat', m);
+    if (lv > 1 && sp % 2 === 1) bgmHit(ac, t, 'hat', m);
+    if (sp % 2 === 0) bgmVoice(ac, mtof(root - 12 + (sp % 8 === 6 ? 12 : 0)), t, 0.2, 'sawtooth', 0.2, m);
+    var arp = tones[(sp * 2 + (bar % 2)) % 3] + (sp % 8 < 4 ? 24 : 36);
+    bgmVoice(ac, mtof(root + arp), t, 0.12, 'square', 0.07, m);
+    if (sp % 4 === 0) { tones.forEach(function (x) { bgmVoice(ac, mtof(root + 12 + x), t, 0.38, 'sawtooth', 0.035, m); }); }
+    if (bar === 7 || bar === 3) {   // hook
+      var hook = [12, -1, 14, -1, 16, -1, 19, 16, 14, -1, 12, -1, 7, 9, 12, -1][sp];
+      if (hook >= 0) bgmVoice(ac, mtof(root + 24 + hook), t, 0.2, 'triangle', 0.16, m);
+    }
+  }
+  function bgmTick() {
+    var ac = AC; if (!ac || !BGM.on) return;
+    var spd = (60 / (BGM.level > 1 ? 176 : 164)) / 4;
+    while (BGM.next < ac.currentTime + 0.35) { bgmStep(ac, BGM.next, BGM.step); BGM.next += spd; BGM.step++; }
+  }
+  function feverBgmStart(level) {
+    var ac = audio(); if (!ac || BGM.on) return;
+    BGM.on = true; BGM.level = level; BGM.step = 0; BGM.next = ac.currentTime + 0.12;
+    var g = ac.createGain(); g.gain.setValueAtTime(0.0001, ac.currentTime); g.gain.exponentialRampToValueAtTime(0.5, ac.currentTime + 0.4); g.connect(ac.destination); BGM.master = g;
+    BGM.timer = setInterval(bgmTick, 90); bgmTick();
+  }
+  function feverBgmStop() {
+    if (!BGM.on) return;
+    BGM.on = false; clearInterval(BGM.timer); BGM.timer = null;
+    var g = BGM.master, ac = AC; BGM.master = null;
+    if (g && ac) { try { g.gain.cancelScheduledValues(ac.currentTime); g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), ac.currentTime); g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.5); setTimeout(function () { try { g.disconnect(); } catch (e) { } }, 700); } catch (e) { } }
+  }
+  function feverSync() {   // called on every render: the BGM follows the table state (works for online guests, too)
+    var h = game && game.h, on = !!(h && h.fever && h.phase !== 'END' && S.phase === 'play' && !S.fast);
+    document.body.classList.toggle('fever-on', on);
+    var md = game && S.phase === 'play' ? game.mode : '';
+    document.body.classList.toggle('m-dopa', md === 'dopa'); document.body.classList.toggle('m-dopadopa', md === 'dopadopa');
+    if (on) { if (!BGM.on) feverBgmStart(h.fever.level); } else if (BGM.on) feverBgmStop();
+  }
+  function feverN(f) { return f ? (f.list ? f.list.length : f.n | 0) : 0; }
+  // moves nobody has to decide during a fever: the other players' forced tsumo-giri, and the fever player's draws that change nothing
+  function feverForced(req) {
+    var h = game.h;
+    if (!h.fever || req.kind !== 'turn' || !h.drawn) return null;
+    if (req.seat !== h.fever.seat) return { act: 'discard', id: h.drawn.id, riichi: 0 };
+    var o = game.turnOptions(req.seat);
+    if (o.tsumo || o.ankan.length || o.kakan.length || o.nuki.length) return null;
+    return { act: 'discard', id: h.drawn.id, riichi: 0 };
+  }
+
   // ---------- events ----------
   function onEvent(name, d) {
     var h = game.h;
     if (name === 'discard') {
       logLine(pname(d.seat) + ': 打 ' + MJ.typeName(d.tile.t) + (d.tile.red ? '(赤)' : d.tile.gem ? '(' + MJ.GEMS[d.tile.gem].name + ')' : ''));
     } else if (name === 'riichi') {
+      if (d.fever) return;
       logLine(pname(d.seat) + ': ' + (d.open ? 'オープンリーチ' : d.double ? 'ダブルリーチ' : 'リーチ'));
       var rt = d.open ? 'オープンリーチ' : d.double ? 'ダブルリーチ' : 'リーチ';
       flash(rt + '！', 'riichi'); sfx('riichi'); speak(rt);
+    } else if (name === 'fever') {
+      feverCutin(d);
+    } else if (name === 'feverwin') {
+      logLine(pname(d.seat) + ': フィーバー和了 ' + d.n + '/' + d.need); flash('フィーバー和了！' + (d.need > 1 ? d.n + '/' + d.need : ''), 'riichi'); sfx('win');
     } else if (name === 'flower') {
       logLine(pname(d.seat) + ': ' + FLOWER[d.tile.t] + ' を抜き');
     } else if (name === 'nuki') {
@@ -3277,9 +3514,19 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
         var key = md === 'online' ? 'ostats' : 'stats';
         var st = (p && p[key]) || {}, add = a.p_stats || {};
         Object.keys(add).forEach(function (k) { if (typeof add[k] === 'number') st[k] = (st[k] || 0) + add[k]; });
-        var f = { name: toFS(session.name), uid: toFS(session.uid), created: toFS((p && p.created) ? new Date(p.created) : new Date()), stats: toFS((p && p.stats) || {}), ostats: toFS((p && p.ostats) || {}) };
+        var f = { name: toFS(session.name), uid: toFS(session.uid), created: toFS((p && p.created) ? new Date(p.created) : new Date()), stats: toFS((p && p.stats) || {}), ostats: toFS((p && p.ostats) || {}), dopa: toFS((p && p.dopa) || {}) };
         f[key] = toFS(st);
         return fsCall('PATCH', '/players/' + session.uid, { fields: f });
+      });
+    }
+    if (fn === 'mj_submit_dopa') {
+      if (!session) return Promise.reject({ code: 'invalid_session' });
+      var dm = a.p_mode === 'dopadopa' ? 'dopadopa' : 'dopa';
+      return getPlayer().then(function (p) {
+        var cur = (p && p.dopa) || {}, ch = Math.round(a.p_chips || 0);
+        if (cur[dm] !== undefined && cur[dm] >= ch) return { ok: true };
+        cur[dm] = ch;
+        return fsCall('PATCH', '/players/' + session.uid + '?updateMask.fieldPaths=dopa', { fields: { dopa: toFS(cur) } });
       });
     }
     if (fn === 'mj_submit_win') {
@@ -3332,7 +3579,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
             h2h: Object.keys(h2h).map(function (k) { return h2h[k]; }).sort(function (x, y) { return y.chips - x.chips; }) };
         };
         var cpu = mk('cpu'), onl = mk('online');
-        return Object.assign({ name: adm ? (p.name || a.p_name || '') : session.name, uid: uid, cpu: cpu, online: onl }, cpu);
+        return Object.assign({ name: adm ? (p.name || a.p_name || '') : session.name, uid: uid, cpu: cpu, online: onl, dopa: p.dopa || {} }, cpu);
       });
     }
     return Promise.reject({ code: 'unknown_fn' });
@@ -3358,11 +3605,24 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     });
     return p;
   }
+  function dopaLocalBest(m, ch) {
+    try { var o = JSON.parse(localStorage.getItem('mj-dopa-best') || '{}'); if (o[m] === undefined || ch > o[m]) { o[m] = ch; localStorage.setItem('mj-dopa-best', JSON.stringify(o)); } } catch (e) { }
+  }
+  function dopaBestMap(srv) {
+    var o = {}; try { o = JSON.parse(localStorage.getItem('mj-dopa-best') || '{}'); } catch (e) { }
+    srv = srv || {}; ['dopa', 'dopadopa'].forEach(function (k) { if (srv[k] !== undefined && (o[k] === undefined || srv[k] > o[k])) o[k] = srv[k]; });
+    return o;
+  }
   function submitMatchResult() {
+    if (game && game.over && isDopa()) dopaLocalBest(game.mode, game.P[0].chips);
     if (!session || !bkReady() || !game || !game.over) return Promise.resolve('skip');
     var rows = [0, 1, 2].map(function (s) { return { s: s, total: (game.P[s].score - 35000) / 1000 + game.P[s].chips }; }).sort(function (a, b) { return b.total - a.total; });
     var rank = 1 + rows.findIndex(function (r) { return r.s === 0; });
     var P = game.P[0], myTot = (P.score - 35000) / 1000 + P.chips, md = S.mode === 'online' ? 'online' : 'cpu';
+    if (isDopa()) {   // お遊び: no ranking / stats, only the best chip count per mode is kept
+      matchStats = blankProfile(); matchWins = []; matchPair = [0, 0, 0];
+      return bkCall('mj_submit_dopa', { p_token: session.token, p_mode: game.mode, p_chips: P.chips }).then(function () { return 'dopa'; }, function () { return 'dopa'; });
+    }
     var opp = [1, 2].map(function (vs) { return { n: NAMES[vs], c: matchPair[vs], d: myTot - ((game.P[vs].score - 35000) / 1000 + game.P[vs].chips) }; });
     var tasks = [{ fn: 'mj_submit_hanchan', args: { p_total: Math.round(myTot * 10) / 10, p_rank: rank, p_points: P.score, p_chips: P.chips, p_stats: matchStats, p_mode: md, p_opp: opp } }];
     matchWins.sort(function (a, b) { return b.chips - a.chips; }).slice(0, 5).forEach(function (w) { tasks.push({ fn: 'mj_submit_win', args: { p_chips: w.chips, p_note: w.note, p_snap: w.snap, p_mode: md } }); });
@@ -3376,7 +3636,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
   // ---- 役満速報 (yakuman bulletin) ----
   function yakumanLabel(w) { var ev = w.ev || {}; return ev.yakuman && ev.yakuman.length ? ev.yakuman.join('・') : (ev.tier || '数え役満'); }
   function submitYakuman(w, ch) {
-    if (!session || !bkReady()) return;
+    if (!session || !bkReady() || isDopa()) return;
     var args = { p_chips: Math.max(0, Math.round(ch)), p_label: yakumanLabel(w), p_snap: winSnap(w), p_mode: S.mode === 'online' ? 'online' : 'cpu' };
     YM.seen[session.name + '|' + args.p_label + '|' + args.p_chips] = 1;
     bkCall('mj_submit_yakuman', Object.assign({ p_token: session.token }, args)).then(function () { loadYakuman(); })
@@ -3522,7 +3782,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       '<tr><td>1回の和了での最大祝儀</td><td>' + (r.maxChipWin || 0) + '枚</td></tr>' +
       '<tr><td>祝儀の累計</td><td>' + signed(r.sumChips || 0) + '枚</td></tr>' +
       '<tr><td>和了率 / 放銃率 / リーチ率</td><td>' + pct(st.wins || 0, st.hands || 0) + ' / ' + pct(st.dealIn || 0, st.hands || 0) + ' / ' + pct(st.riichi || 0, st.hands || 0) + '</td></tr>' +
-      '</tbody></table>' + h2hHTML(r.h2h) + voiceHTML(st) + styleHTML(st, admin ? 'この人の全記録' : 'あなたの全記録', admin) + (admin ? counterHTML(st, r) : '');
+      '</tbody></table>' + (function () { var d = dopaBestMap(r0.dopa); return '<div class="muted" style="margin:6px 0">お遊びモードの半荘最高祝儀: ドパ ' + (d.dopa !== undefined ? signed(d.dopa) + '枚' : '-') + ' / ドパドパ ' + (d.dopadopa !== undefined ? signed(d.dopadopa) + '枚' : '-') + '</div>'; })() + h2hHTML(r.h2h) + voiceHTML(st) + styleHTML(st, admin ? 'この人の全記録' : 'あなたの全記録', admin) + (admin ? counterHTML(st, r) : '');
     if (admin) return h + '<div class="foot"><button class="btn" data-act="adminlist">一覧へ戻る</button><button class="btn" data-act="closemodal">閉じる</button></div>';
     return h + '<div class="foot"><button class="btn" data-act="closemodal">閉じる</button><button class="btn" data-act="openrank">ランキング</button><button class="btn ghost" data-act="dologout">ログアウト</button></div>';
   }
@@ -3826,6 +4086,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
   function renderAll() {
     if (!root) return;
     var mb = $('#btn-menu'); if (mb) mb.hidden = S.phase === 'start';
+    try { feverSync(); } catch (e) { }
     if (S.phase === 'start') { root.innerHTML = startHTML(); return; }
     if (S.phase === 'sim') { root.innerHTML = simPageHTML(); return; }
     root.innerHTML = tableHTML() + (settings.showLog ? logHTML() : '');
@@ -3843,13 +4104,13 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       tileHTML({ t: 9 }) + tileHTML({ t: 13, red: true }) + tileHTML({ t: 30, gem: 'amethyst' }) + tileHTML({ t: 22, gem: 'garnet' }) + tileHTML({ t: 33 }) + '</div>' +
       '<h1>三麻 祝儀麻雀</h1>' +
       '<p>3人麻雀・35000点持ち35000点返し・半荘戦。ジュエル牌と花牌が入る独自ルールです。CPU2人はモンテカルロ法の期待値(点数+祝儀)で打牌・リーチ・鳴きを決めます。</p>' +
-      '<div class="actions" style="justify-content:center;margin-top:14px">' + (saveInfo() ? '<button class="btn go" data-act="resume">▶ 続きから <small>(' + esc(saveInfo().label) + ')</small></button>' : '<button class="btn go" data-act="start">CPU対局</button>') + '<button class="btn go" data-act="online">' + (lastRoom() ? 'オンライン対局に戻る' : 'オンライン対局') + '</button>' + '<button class="btn" data-act="simsetup" style="background:var(--tile)">シミュレーション</button><button class="btn" data-act="rules" style="background:var(--tile)">ルール確認</button></div>' +
+      '<div class="actions" style="justify-content:center;margin-top:14px">' + (saveInfo() ? '<button class="btn go" data-act="resume">▶ 続きから <small>(' + esc(saveInfo().label) + ')</small></button>' : '<button class="btn go" data-act="start" data-mode="normal">CPU対局(ノーマル)</button><button class="btn go" data-act="start" data-mode="dopa" style="background:#b8478c">CPU(ドパ)</button><button class="btn go" data-act="start" data-mode="dopadopa" style="background:#8a2be2">CPU(ドパドパ)</button>') + '<button class="btn go" data-act="online">' + (lastRoom() ? 'オンライン対局に戻る' : 'オンライン対局') + '</button>' + '<button class="btn" data-act="simsetup" style="background:var(--tile)">シミュレーション</button><button class="btn" data-act="rules" style="background:var(--tile)">ルール確認</button></div>' +
       '<div class="actions" style="justify-content:center;margin-top:8px"><button class="btn" data-act="openrank" style="background:var(--tile)">🏆 ランキング</button><button class="btn" data-act="openrecord" style="background:var(--tile)">📊 マイ成績</button><button class="btn" data-act="openstyle" style="background:var(--tile)">🔍 打ち筋分析</button></div>' + yakumanHTML() + '</div>';
   }
   function badgesFor(s) {
     var h = game.h, b = '';
     var r = h.rii[s];
-    if (r) b += '<span class="badge riichi">' + (r.open ? 'オープンリーチ' : 'リーチ') + '</span>';
+    if (r) b += '<span class="badge riichi">' + (r.fever > 1 ? 'ダブルフィーバー' : r.fever ? 'フィーバー' : r.open ? 'オープンリーチ' : 'リーチ') + '</span>';
     else if (h.pendRii && h.pendRii.seat === s) b += '<span class="badge riichi">リーチ宣言</span>';
     if (S.thinking === s && !S.online) b += '<span class="badge think">思考中…</span>';
     if (h.melds[s].some(function (m) { return m.kind !== 'ankan'; })) b += '<span class="badge">副露</span>';
@@ -3884,13 +4145,13 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     var active = (h.phase === 'TURN' && h.cur === s) || (S.thinking === s && !S.online);
     var hand = '';
     var r = h.rii[s];
-    if (r && r.open) hand = '<div class="ohand">' + tilesHTML(sortTiles(h.hands[s]), 'sm') + '</div>';
+    if ((r && r.open) || h.fever) hand = '<div class="ohand">' + tilesHTML(sortTiles(h.hands[s]), 'sm') + '</div>';
     else {
       var n = h.hands[s].length; hand = '<div class="ohand">';
       for (var i = 0; i < n; i++) hand += backHTML('xs');
       hand += '</div>';
     }
-    return '<section class="seatbox' + (active ? ' active' : '') + (h.rii[s] ? ' riichi' : '') + '">' + seatHeader(s) + '<div class="badges">' + badgesFor(s) + '</div>' + ((r && r.open && !S.watch) ? waitBoxHTML(s, '待ち') : '') + extrasFor(s, false) + hand + riverHTML(s) + '</section>';
+    return '<section class="seatbox' + (active ? ' active' : '') + (h.rii[s] ? ' riichi' : '') + '">' + seatHeader(s) + '<div class="badges">' + badgesFor(s) + '</div>' + (((r && r.open || h.fever && h.fever.seat === s) && !S.watch) ? waitBoxHTML(s, '待ち') : '') + extrasFor(s, false) + hand + riverHTML(s) + '</section>';
   }
   function effectsText() {
     var o = game.omoteInds(), out = [];
@@ -3905,7 +4166,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     var dora = tilesHTML(o, 'sm');
     for (var i = o.length; i < 5; i++) dora += backHTML('sm');
     var ef = effectsText();
-    return '<div class="info"><span class="round">' + roundLabel() + '</span><span class="kv">本場 <b>' + game.honba + '</b></span><span class="kv">供託 <b>' + game.kyotaku + '</b></span><span class="kv">残り <b>' + game.rem() + '</b></span>' +
+    return '<div class="info"><span class="round">' + roundLabel() + '</span><span class="kv">本場 <b>' + game.honba + '</b></span><span class="kv">供託 <b>' + game.kyotaku + '</b></span>' + (game.mode === 'dopa' ? '<span class="kv fev">ドパ</span>' : game.mode === 'dopadopa' ? '<span class="kv fev">ドパドパ</span>' : '') + (h.fever ? '<span class="kv fev">FEVER' + (h.fever.need > 1 ? ' ' + feverN(h.fever) + '/' + h.fever.need : '') + '</span>' : '') + '<span class="kv">残り <b>' + game.rem() + '</b></span>' +
       '<span class="dora-row"><span class="lbl">ドラ表示</span>' + dora + '</span>' +
       (ef.length ? '<div class="efx">' + ef.map(function (x) { return '<span>' + x + '</span>'; }).join('') + '</div>' : '') + '</div>';
   }
@@ -3920,12 +4181,16 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
         b += '<button class="btn' + (S.riichiMode === 1 ? ' on' : '') + '" data-act="riichi">リーチ</button>';
         b += '<button class="btn' + (S.riichiMode === 2 ? ' on' : '') + '" data-act="open">オープンリーチ</button>';
       }
+      if (o.fever && o.fever.length) {
+        var lvAll = Math.max.apply(null, o.fever.map(function (id) { return game.feverLevelAfter(0, id); }));
+        b += '<button class="btn fever' + (S.riichiMode === 3 ? ' on' : '') + '" data-act="fever">' + (lvAll > 1 ? 'ダブルフィーバーリーチ' : 'フィーバーリーチ') + '</button>';
+      }
       o.ankan.forEach(function (t) { b += '<button class="btn" data-act="ankan" data-t="' + t + '">暗槓 ' + MJ.typeName(t) + '</button>'; });
       o.kakan.forEach(function (id) { b += '<button class="btn" data-act="kakan" data-id="' + id + '">加槓</button>'; });
       if (o.nuki.length) b += '<button class="btn" data-act="nuki" data-id="' + o.nuki[0] + '">' + tx('北(5萬)を抜く') + '</button>';
       if (S.selected !== null && o.discard.indexOf(S.selected) >= 0) {
-        var ok = !S.riichiMode || o.riichi.indexOf(S.selected) >= 0;
-        b += '<button class="btn go"' + (ok ? '' : ' disabled') + ' data-act="discard">' + (S.riichiMode ? 'リーチして打牌' : '打牌') + '</button>';
+        var ok = !S.riichiMode || (S.riichiMode === 3 ? o.fever : o.riichi).indexOf(S.selected) >= 0;
+        b += '<button class="btn go"' + (ok ? '' : ' disabled') + ' data-act="discard">' + (S.riichiMode === 3 ? 'フィーバーリーチして打牌' : S.riichiMode ? 'リーチして打牌' : '打牌') + '</button>';
       }
       if (h.rii[0] && h.drawn && !o.tsumo) b += '<button class="btn go" data-act="tsumogiri">ツモ切り</button>';
       b += '<button class="btn ghost" data-act="hint">ヒント</button>';
@@ -4001,7 +4266,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       var cls = (extraCls || '') + (S.selected === t.id ? ' sel' : '');
       if (p) {
         var can = o.discard.indexOf(t.id) >= 0;
-        if (S.riichiMode) can = can && o.riichi.indexOf(t.id) >= 0;
+        if (S.riichiMode) can = can && (S.riichiMode === 3 ? o.fever : o.riichi).indexOf(t.id) >= 0;
         if (!can) cls += ' dim';
       }
       return tileHTML(t, cls, ' data-tid="' + t.id + '" tabindex="0"');
@@ -4184,6 +4449,8 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       '<li>鳴きなしボタンは手牌の上にあり、局が変わるとOFFに戻ります。</li>' +
       '<li>オープンリーチは2翻。リーチしていない人が振り込むと役満払い。副露してリーチしている場合も、ツモ和了なら門前清自摸和(1翻)が付きます。</li>' +
       '<li>四花: 1人で花牌4枚をすべて抜く(表・裏ドラ表示牌に出た花牌も含めて4枚そろう)と、和了時に祝儀+5枚。四北: 5萬4枚をすべて抜く・手牌で使う(表・裏ドラ表示牌の5萬も含む)と、和了時に祝儀+3枚。</li>' +
+      '<li>【ドパ】5の牌に加え、全種類の牌から1枚ずつランダムにジュエル効果を持ち(毎局抽選)、数え役満は15翻以上、白ぽっちは3枚。【ドパドパ】同2枚ずつ、17翻以上、白ぽっち4枚。ドパ系は成績・ランキングに反映されず、半荘の最高祝儀枚数だけ個人記録に残ります。</li>' +
+      '<li>【フィーバーリーチ】7筒または7索を門前の暗刻(暗槓)で持ち、テンパイでリーチするとき選べます。全員の手牌が公開され全員ツモ切り。フィーバーした本人のみ和了でき、1回和了か流局まで継続(7筒7索ともに暗刻ならダブルフィーバーで2回和了まで)。公開時に待ち牌が山にないと即流局。白ぽっちはツモのみ。</li>' +
       '<li>数え役満(13翻以上)で和了すると祝儀+5枚。夏の効果で数え役満に昇格した場合は祝儀+3枚です(サイコロはありません)。</li>' +
       '<li>本役満で和了すると祝儀に5枚と20面サイコロの出目が加算されます(オープンリーチの放銃による役満払いは対象外)。リーチ後に引いた加槓可能な牌は、ポンした牌なら加槓できます。</li>' +
       '<li>「リーチして和了なら上位の効果」のもの(春の大きい目、冬の下段など)は、副露していてリーチなしなら下位の効果になります。</li></ul>' +
@@ -4238,7 +4505,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       ' &nbsp; <b class="pos">' + signed(total) + '点</b>' + (w.kyo ? '<span class="muted"> (供託 ' + fmt(w.kyo) + ' 含む)</span>' : '') + '</div>';
     var ch = ev.chips;
     h += '<div class="chiplist"><b class="' + (ch.total ? 'pos' : '') + '">祝儀 ' + (w.tsumo ? ch.total + '枚 × 2人' : ch.total + '枚') + '</b>' +
-      (ch.items.length ? ' : ' + ch.items.map(function (i) { return i.label + ' ' + (i.mult ? '×2' : '+' + (Math.round(i.n * 10) / 10)); }).join(' / ') : '') +
+      (ch.items.length ? ' : ' + ch.items.map(function (i) { return i.label + ' ' + (i.mult ? '×' + (i.m || 2) : '+' + (Math.round(i.n * 10) / 10)); }).join(' / ') : '') +
       (ch.rolls && ch.rolls.length ? ' (サイコロ ' + diceText(ch.rolls) + ')' : '') + '</div>';
     return h + '</div>';
   }
@@ -4271,6 +4538,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
             (rv ? '<div class="tp-wait">待ち: ' + rv.waits.map(function (w) { return esc(MJ.typeName(w.t)) + ' <b>残り' + w.left + '枚</b>'; }).join(' / ') + '</div>' : '') + '</div>';
         }).join('') + '<div class="muted" style="font-size:11px">残り枚数 = 捨て牌・副露・ドラ表示牌・公開された聴牌者の手牌に見えていない牌の枚数</div></div>';
     }
+    if (res.fever) html += '<div class="res-card"><div class="big" style="color:#e0463a">' + (res.fever.level > 1 ? 'ダブルフィーバー' : 'フィーバー') + ' ' + esc(NAMES[res.fever.seat]) + '</div><div>' + (res.fever.n >= res.fever.need ? '和了 ' + res.fever.n + '/' + res.fever.need + '回でフィーバー終了' : res.fever.n ? '和了 ' + res.fever.n + '/' + res.fever.need + '回(待ち牌が尽きてフィーバー終了)' : '和了できず(待ち牌が山になくフィーバー終了)') + '</div></div>';
     html += scoreTable(res);
     html += '<div class="foot"><button class="btn go" data-act="nexthand">' + (isLastHand(res) ? '最終結果へ' : '次の局へ') + '</button></div>';
     return html;
@@ -4292,7 +4560,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     rows.forEach(function (r, i) {
       html += '<tr><td>' + (i + 1) + '位 ' + NAMES[r.s] + '</td><td>' + fmt(r.score) + '</td><td>' + signed(r.chips) + '</td><td class="' + (r.total > 0 ? 'pos' : r.total < 0 ? 'neg' : '') + '"><b>' + signed(Math.round(r.total * 10) / 10) + '</b></td></tr>';
     });
-    html += '</table><p id="sub-status" class="muted">' + (!bkReady() ? '' : session ? '成績を送信中…' : 'ログインすると、成績がランキングに記録されます。') + '</p><div class="foot"><button class="btn" data-act="openrank">ランキング</button>' + (bkReady() && !session ? '<button class="btn" data-act="openauth">ログイン</button>' : '') + '' + (S.online && S.rematch ? '<button class="btn" data-act="oendfinal">終了</button><button class="btn go" id="ol-again" data-act="oagain">もう一度 (<span id="ol-cd">' + Math.max(0, Math.ceil((S.rematch.until - Date.now()) / 1000)) + '</span>)</button>' : '<button class="btn go" data-act="restart">もう一度対局する</button>') + '</div>';
+    html += '</table><p id="sub-status" class="muted">' + (!bkReady() ? '' : session ? (isDopa() ? 'ドパ戦は成績・ランキングに反映されません(半荘の最高枚数のみ記録)。' : '成績を送信中…') : 'ログインすると、成績がランキングに記録されます。') + '</p><div class="foot"><button class="btn" data-act="openrank">ランキング</button>' + (bkReady() && !session ? '<button class="btn" data-act="openauth">ログイン</button>' : '') + '' + (S.online && S.rematch ? '<button class="btn" data-act="oendfinal">終了</button><button class="btn go" id="ol-again" data-act="oagain">もう一度 (<span id="ol-cd">' + Math.max(0, Math.ceil((S.rematch.until - Date.now()) / 1000)) + '</span>)</button>' : '<button class="btn go" data-act="restart">もう一度対局する</button>') + '</div>';
     return html;
   }
 
@@ -4508,8 +4776,8 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       submitMatchResult().then(function () { flushOutbox(); showModal('<h2>投了しました</h2><p>現在の順位(' + currentRank() + '位)で成績を記録しました。</p><div class="foot"><button class="btn go" data-act="closemodal">閉じる</button></div>'); }, function () { }).then(done);
     } else done();
   }
-  function startMatch(resume) {
-    S.mode = 'cpu'; S.online = null;
+  function startMatch(resume, mode) {
+    S.mode = 'cpu'; S.online = null; if (mode) S.cpuMode = mode;
     var o = resume ? loadSave() : null;
     if (!resume && loadSave()) { showModal(resumeAskHTML()); return Promise.resolve(); }
     return runMatch(o);
@@ -4541,9 +4809,10 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       S.log = o.log || []; S.noCall = !!o.noCall; st = o.stage;
     } else {
       matchStats = blankProfile(); matchWins = []; matchPair = [0, 0, 0];
-      game = new MJ.Game({ names: NAMES }); S.log = [];
+      game = new MJ.Game({ names: NAMES, mode: online ? (O.mode || 'normal') : (S.cpuMode || 'normal') }); S.log = [];
       if (online && O.dealer0 !== undefined) game.dealer = O.dealer0;
     }
+    S.cpuMode = game.mode || 'normal'; if (O) O.mode = game.mode || 'normal';
     game.ev = online ? function (n, d) {
       onEvent(n, d);
       var w = evToWire(n, d); if (w) { w.id = ++O.evId; O.evLog.push(w); if (O.evLog.length > 60) O.evLog.shift(); }
@@ -4589,7 +4858,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     }
     if (session && bkReady()) {
       var sp = submitMatchResult(); clearSave();
-      sp.then(function (r) { var el = $('#sub-status'); if (el) el.textContent = r === 'sent' ? '成績をランキングに送信しました。' : r === 'queued' ? '通信できなかったため、次回ログイン時に送信します。' : ''; flushOutbox(); }, function (e) { var el = $('#sub-status'); if (el) el.textContent = errText(e); });
+      sp.then(function (r) { var el = $('#sub-status'); if (el) el.textContent = r === 'dopa' ? 'ドパ戦の最高枚数を記録しました(ランキングには反映されません)。' : r === 'sent' ? '成績をランキングに送信しました。' : r === 'queued' ? '通信できなかったため、次回ログイン時に送信します。' : ''; flushOutbox(); }, function (e) { var el = $('#sub-status'); if (el) el.textContent = errText(e); });
     } else clearSave();
     if (again) {
       hideModal();
@@ -4621,8 +4890,9 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       var req = game.advance();
       if (req.kind === 'end') { renderAll(); return; }
       renderAll();
-      var resp, human = req.seat === 0;
-      if (human) resp = await humanDecide(req);
+      var resp, human = req.seat === 0, ff = feverForced(req);
+      if (ff) resp = ff;
+      else if (human) resp = await humanDecide(req);
       else resp = await cpuDecide(req);
       if (mid !== S.matchId) return;
       S.selected = null; S.riichiMode = 0; S.hint = null; S.adv = null; S.opts = null;
@@ -4631,7 +4901,8 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       S.pending = null;
       saveMatch('play');
       renderAll();
-      if (!human) {
+      if (ff) await sleep(Math.min(settings.pace, 130));
+      else if (!human) {
         var quiet = resp.act === 'pass' || resp.act === 'ron' && false;
         await sleep(resp.act === 'pass' ? 30 : settings.pace);
       } else await sleep(200);
@@ -4756,13 +5027,13 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
   function setLastRoom(c) { try { if (c) localStorage.setItem(OL_KEY, c); else localStorage.removeItem(OL_KEY); } catch (e) { } }
   function olErr(msg) { return '<p role="alert" style="color:#e66">' + esc(msg) + '</p>'; }
   function miniT(t) { return t ? { t: t.t, red: !!t.red, gem: t.gem || null, pochi: !!t.pochi } : null; }
-  var OL_EVS = ['discard', 'riichi', 'flower', 'nuki', 'meld', 'ankan', 'kakan', 'dora'];
+  var OL_EVS = ['discard', 'riichi', 'flower', 'nuki', 'meld', 'ankan', 'kakan', 'dora', 'fever', 'feverwin'];
   function evToWire(n, d) {
     if (OL_EVS.indexOf(n) < 0) return null;
-    return { n: n, seat: d.seat, tile: miniT(d.tile), open: !!d.open, double: !!d.double, kind: d.meld && d.meld.kind, ind: miniT(d.ind) };
+    return { n: n, seat: d.seat, tile: miniT(d.tile), open: !!d.open, double: !!d.double, kind: d.meld && d.meld.kind, ind: miniT(d.ind), level: d.level, fn: d.n, need: d.need, fever: d.fever };
   }
   function evForView(e, a) {
-    return { id: e.id, n: e.n, d: { seat: e.seat === undefined ? undefined : (e.seat - a + 3) % 3, tile: e.tile, open: e.open, double: e.double, meld: e.kind ? { kind: e.kind } : undefined, ind: e.ind } };
+    return { id: e.id, n: e.n, d: { seat: e.seat === undefined ? undefined : (e.seat - a + 3) % 3, tile: e.tile, open: e.open, double: e.double, meld: e.kind ? { kind: e.kind } : undefined, ind: e.ind, level: e.level, n: e.fn, need: e.need, fever: e.fever } };
   }
   function autoRespFor(req) {   // time-out move: discard the drawn tile (tsumogiri); pass on any call
     if (req.kind === 'turn') {
@@ -4797,7 +5068,8 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     if (isHost) {
       var ok = humans >= 2 && (humans + (LB.cpu ? 1 : 0)) >= 3 || (humans >= 3);
       var seatsOk = Math.min(humans, LB.cpu ? 2 : 3) + (LB.cpu ? 1 : 0) === 3;
-      h += '<p class="muted">' + (seatsOk ? '開始できます。' : humans < 2 ? '最低2人の入室が必要です。' : 'CPUを追加すると3人で始められます。') + '</p>' +
+      h += '<div class="actions" style="justify-content:center;margin:6px 0">' + [['normal', 'ノーマル'], ['dopa', 'ドパ'], ['dopadopa', 'ドパドパ']].map(function (m) { return '<button class="btn' + (LB.mode === m[0] ? ' go' : '') + '" data-act="omode" data-mode="' + m[0] + '">' + m[1] + '</button>'; }).join('') + '</div>' + (LB.mode !== 'normal' ? '<p class="muted">お遊びモード: 成績・ランキングには反映されません(半荘の最高枚数のみ個人記録)。</p>' : '') +
+        '<p class="muted">' + (seatsOk ? '開始できます。' : humans < 2 ? '最低2人の入室が必要です。' : 'CPUを追加すると3人で始められます。') + '</p>' +
         '<div class="foot"><button class="btn ghost" data-act="oleave">部屋を閉じる</button><button class="btn" data-act="ocpu"' + (humans >= 3 ? ' disabled' : '') + '>' + (LB.cpu ? 'CPUを外す' : 'CPUを追加') + '</button><button class="btn go" data-act="ostart"' + (seatsOk ? '' : ' disabled') + '>対局開始</button></div>';
     } else {
       h += '<p class="muted">ホストが開始するのを待っています…</p><div class="foot"><button class="btn ghost" data-act="oleave">退出</button></div>';
@@ -4816,7 +5088,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     showModal('<h2>部屋を作成中…</h2>');
     attempt().then(function (code) {
       lobbyStop(); setLastRoom(code);
-      LB = { role: 'host', code: code, hostName: session.name, members: [], cpu: false, err: '' };
+      LB = { role: 'host', code: code, hostName: session.name, members: [], cpu: false, mode: 'normal', err: '' };
       showModal(lobbyHTML());
       LB.w1 = rtWatch('rooms/' + code + '/members', function (v) {
         if (!LB || LB.code !== code) return;
@@ -4843,7 +5115,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       if (r.status !== 'lobby') { openOnline('この部屋は終了しています'); return; }
       return rt('PUT', 'rooms/' + code + '/members/' + session.uid, { name: session.name, at: Date.now() }).then(function () {
         lobbyStop(); setLastRoom(code);
-        LB = { role: 'guest', code: code, hostName: r.hostName, hostUid: r.host, members: [], cpu: false, err: '' };
+        LB = { role: 'guest', code: code, hostName: r.hostName, hostUid: r.host, members: [], cpu: false, mode: 'normal', err: '' };
         showModal(lobbyHTML());
         LB.w1 = rtWatch('rooms/' + code + '/members', function (v) {
           if (!LB || LB.code !== code) return;
@@ -4879,7 +5151,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     var dealer0 = Math.floor(Math.random() * 3);   // random starting dealer = random east seat
     roomInfo(L.code, { status: 'playing', seats: JSON.stringify(seats), turnMs: turnMs() }).then(function () {
       var code = L.code; lobbyStop();
-      S.online = { role: 'host', code: code, seats: seats.map(function (s) { return Object.assign({ miss: 0, away: false }, s); }), seq: Math.floor(Date.now() / 10), evLog: [], evId: 0, dealer0: dealer0 };
+      S.online = { role: 'host', code: code, seats: seats.map(function (s) { return Object.assign({ miss: 0, away: false }, s); }), seq: Math.floor(Date.now() / 10), evLog: [], evId: 0, dealer0: dealer0, mode: L.mode || 'normal' };
       runMatch(null, true);
     }, function (e) { if (LB) { LB.err = errText(e); showModal(lobbyHTML()); } });
   }
@@ -4927,9 +5199,11 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       if (mid !== S.matchId) return;
       var req = game.advance();
       if (req.kind === 'end') { renderAll(); await publishViews(null, null, 0, -1); return; }
-      var st = O.seats[req.seat], resp;
-      if (st.away && !st.cpu) await checkBack(req.seat);
-      if (st.cpu || st.away) {
+      var st = O.seats[req.seat], resp, ff = feverForced(req);
+      if (ff) {
+        resp = ff; publishViews(null, null, 0, -1);
+      } else if (st.away && !st.cpu) await checkBack(req.seat);
+      if (ff) { } else if (st.cpu || st.away) {
         S.cd = null; publishViews(null, null, 0, req.seat); renderAll();
         resp = await cpuDecide(req);
       } else if (req.seat === 0) {
@@ -4949,13 +5223,13 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       if (mid !== S.matchId) return;
       S.selected = null; S.riichiMode = 0; S.hint = null; S.adv = null; S.opts = null;
       if (req.seat === 0) { try { recordDecisionProfile(resp); } catch (e) { } }
-      if (req.kind === 'turn' && resp.act === 'discard' && Math.random() < 0.025) await sleep(1000 + Math.random() * 1000);   // fake think time so discard speed does not leak the hand
+      if (!ff && req.kind === 'turn' && resp.act === 'discard' && Math.random() < 0.025) await sleep(1000 + Math.random() * 1000);   // fake think time so discard speed does not leak the hand
       if (mid !== S.matchId) return;
       try { game.respond(resp); } catch (e) { game.respond(autoRespFor(req)); }
       S.pending = null;
       saveMatch('play');
       renderAll();
-      if (req.seat !== 0) await sleep(resp.act === 'pass' ? 30 : (st.cpu || st.away ? settings.pace : 150)); else await sleep(120);
+      if (ff) await sleep(180); else if (req.seat !== 0) await sleep(resp.act === 'pass' ? 30 : (st.cpu || st.away ? settings.pace : 150)); else await sleep(120);
     }
   }
   async function waitAcks(mid, seq, ms) {
@@ -5060,7 +5334,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     }, 15000);
     if (session && bkReady()) {
       var sp = submitMatchResult();
-      sp.then(function (r) { var el = $('#sub-status'); if (el) el.textContent = r === 'sent' ? '成績をランキングに送信しました。' : r === 'queued' ? '通信できなかったため、次回ログイン時に送信します。' : ''; flushOutbox(); }, function (e) { var el = $('#sub-status'); if (el) el.textContent = errText(e); });
+      sp.then(function (r) { var el = $('#sub-status'); if (el) el.textContent = r === 'dopa' ? 'ドパ戦の最高枚数を記録しました(ランキングには反映されません)。' : r === 'sent' ? '成績をランキングに送信しました。' : r === 'queued' ? '通信できなかったため、次回ログイン時に送信します。' : ''; flushOutbox(); }, function (e) { var el = $('#sub-status'); if (el) el.textContent = errText(e); });
     }
   }
   function cdHTML() {   // only my own clock is shown; nobody else's name or timer, so waiting on a call never reveals who holds a pair
@@ -5093,16 +5367,17 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
 
   function tryDiscard(id) {
     var o = S.opts; if (!o || o.discard.indexOf(id) < 0) return;
-    if (S.riichiMode) { if (o.riichi.indexOf(id) < 0) return; finish({ act: 'discard', id: id, riichi: S.riichiMode }); }
+    if (S.riichiMode) { if ((S.riichiMode === 3 ? o.fever : o.riichi).indexOf(id) < 0) return; finish({ act: 'discard', id: id, riichi: S.riichiMode }); }
     else finish({ act: 'discard', id: id, riichi: 0 });
   }
   function onAction(b) {
     var a = b.dataset.act;
-    if (a === 'start' || a === 'restart') { startMatch(); return; }
+    if (a === 'start' || a === 'restart') { startMatch(false, b.dataset.mode); return; }
     if (a === 'online') { openOnline(); return; }
     if (a === 'ocreate') { createRoom(); return; }
     if (a === 'ojoin') { joinRoom(($('#ol-code') || {}).value); return; }
     if (a === 'ostart') { hostStart(); return; }
+    if (a === 'omode') { if (LB) { LB.mode = b.dataset.mode; showModal(lobbyHTML()); } return; }
     if (a === 'ocpu') { if (LB) { LB.cpu = !LB.cpu; showModal(lobbyHTML()); } return; }
     if (a === 'oleave') { leaveLobby(); return; }
     if (a === 'oforfeit1') { showModal('<h2>投了しますか?</h2><p>現在の順位で成績を記録して対局を終了します。' + (S.online && S.online.role === 'host' ? '残りの人の対局も終了します。' : '') + '</p><div class="foot"><button class="btn" data-act="closemodal">戻る</button><button class="btn go" data-act="oforfeit2">投了する</button></div>'); return; }
@@ -5205,6 +5480,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     else if (a === 'chi') finish({ act: 'chi', ids: b.dataset.ids.split(',').map(Number) });
     else if (a === 'riichi') { S.riichiMode = S.riichiMode === 1 ? 0 : 1; renderAll(); }
     else if (a === 'open') { S.riichiMode = S.riichiMode === 2 ? 0 : 2; renderAll(); }
+    else if (a === 'fever') { S.riichiMode = S.riichiMode === 3 ? 0 : 3; renderAll(); }
     else if (a === 'ankan') finish({ act: 'ankan', t: +b.dataset.t });
     else if (a === 'kakan') finish({ act: 'kakan', id: +b.dataset.id });
     else if (a === 'nuki') finish({ act: 'nuki', id: +b.dataset.id });
@@ -5254,9 +5530,15 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       if (e.target.closest && e.target.closest('#modal, header, .actions')) return false;
       tryDiscard(game.h.drawn.id); return true;
     }
+    function quickPass(e, anywhere) {   // right-click / double-tap anywhere = パス on a pon/chi/kan choice (never on a ron choice)
+      var p = S.pending; if (!p || !p.req || p.req.kind === 'turn' || p.req.stage === 'ron' || !game || S.phase !== 'play') return false;
+      var m = $('#modal'); if (m && !m.hidden) return false;
+      if (!anywhere && e.target.closest && e.target.closest('button, #modal')) return false;
+      finish({ act: 'pass' }); return true;
+    }
     document.addEventListener('contextmenu', function (e) {
       if (S.phase !== 'play') return;
-      if (quickTsumogiri(e)) e.preventDefault();
+      if (quickPass(e, true) || quickTsumogiri(e)) e.preventDefault();
     });
     var lastTap = { t: 0, x: 0, y: 0, tile: false };
     document.addEventListener('pointerup', function (e) {
@@ -5264,7 +5546,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       var now = Date.now(), onTile = !!(e.target.closest && e.target.closest('[data-tid]'));
       if (now - lastTap.t < 320 && Math.abs(e.clientX - lastTap.x) < 40 && Math.abs(e.clientY - lastTap.y) < 40) {
         // tapping the same tile twice is "select, then discard that tile" - never the drawn-tile shortcut
-        lastTap.t = 0; if (!onTile && !lastTap.tile) quickTsumogiri(e);
+        lastTap.t = 0; if (!quickPass(e) && !onTile && !lastTap.tile) quickTsumogiri(e);
       } else lastTap = { t: now, x: e.clientX, y: e.clientY, tile: onTile };
     });
     $('#btn-rank').addEventListener('click', openRanking);
@@ -5276,7 +5558,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     $('#btn-settings').addEventListener('click', function () { showModal(settingsHTML()); });
     renderAll();
   }
-  window.MJUI = { _showRes: function (res) { showModal(resultHTML(res)); }, _cutin: function (id, who, gain, first) { var c = CUTINS.filter(function (x) { return x.id === id; })[0]; return cutinFx({ seat: 0, tsumo: true }, c, gain, first); }, _special: specialVoice, _bigFx: bigFx, _winSnap: function (w) { return winSnap(w); }, _snapHTML: snapHTML, _bk: function (f, x) { return bkCall(f, x); }, init: init, S: S, getGame: function () { return game; }, startMatch: startMatch, _wildHTML: wildHTML, _show: showModal, _render: renderAll };
+  window.MJUI = { _submit: function () { return submitMatchResult(); }, _showRes: function (res) { showModal(resultHTML(res)); }, _cutin: function (id, who, gain, first) { var c = CUTINS.filter(function (x) { return x.id === id; })[0]; return cutinFx({ seat: 0, tsumo: true }, c, gain, first); }, _special: specialVoice, _bigFx: bigFx, _winSnap: function (w) { return winSnap(w); }, _snapHTML: snapHTML, _bk: function (f, x) { return bkCall(f, x); }, init: init, S: S, getGame: function () { return game; }, startMatch: startMatch, _wildHTML: wildHTML, _show: showModal, _render: renderAll };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 
