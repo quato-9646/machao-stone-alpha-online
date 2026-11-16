@@ -116,6 +116,9 @@ button:focus-visible, .tile:focus-visible { outline: 2px solid var(--gold); outl
 .btn.hot { background: #d9473a; border-color: #8e2a21; color: #fff; }
 .btn.on { box-shadow: 0 0 0 2px var(--gold); }
 .btn.ghost { background: transparent; color: var(--felt-ink); border-color: rgba(255,255,255,.35); }
+.sheet .btn.ghost { color: #111; font-weight: 700; background: #fff; border: 1.5px solid #444; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .sheet .btn.ghost { color: #f2f2f2; background: transparent; border-color: #aaa; } }
+:root[data-theme="dark"] .sheet .btn.ghost { color: #f2f2f2; background: transparent; border-color: #aaa; }
 .btn[disabled] { opacity: .4; cursor: default; }
 .btn .tile { --tw: 18px; vertical-align: middle; box-shadow: none; }
 .hand { display: flex; align-items: flex-end; gap: 2px; padding-top: calc(var(--twb) * .3); min-height: calc(var(--twb) * 1.4 + var(--twb) * .3); flex-wrap: nowrap; }
