@@ -4001,8 +4001,78 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       (i && i.updated ? '<tr><th>最終更新</th><td>' + esc(String(i.updated).replace('T', ' ').slice(0, 16)) + '(検証での差 ' + (i.diff >= 0 ? '+' : '') + i.diff.toFixed(2) + '/半荘)</td></tr>' : '') + '</tbody></table>' +
       '<p class="muted" style="font-size:12px">所要時間の目安は数分〜10分ほどです(端末の速さによります)。「1半荘あたり+1枚(1000点)ぶんの強化」を見分けられる回数にしてあります。実行中は画面を開いたままにしてください。学習中はこの画面を閉じないでください。</p>' +
       (msg ? '<p role="alert">' + msg + '</p>' : '') +
-      '<div class="foot"><button class="btn ghost" data-act="adminlist">戻る</button>' + (i ? '<button class="btn ghost" data-act="cpuundo">ひとつ前に戻す</button><button class="btn ghost" data-act="cpureset">標準に戻す</button>' : '') + '<button class="btn ghost" data-act="cpumeasure">現在の世代を計測(300半荘)</button><button class="btn go" data-act="cpustart">強化を開始(約3万半荘)</button></div>';
+      '<div class="foot"><button class="btn ghost" data-act="adminlist">戻る</button>' + (i ? '<button class="btn ghost" data-act="cpuundo">ひとつ前に戻す</button><button class="btn ghost" data-act="cpureset">標準に戻す</button>' : '') + '<button class="btn ghost" data-act="histopen">世代の比較</button><button class="btn ghost" data-act="cpumeasure">現在の世代を計測(300半荘)</button><button class="btn go" data-act="cpustart">強化を開始(約3万半荘)</button></div>';
   }
+  // ---- generation history (cfg/h): every adopted generation with its settings and measured stats, for comparison ----
+  var cpuHist = null, cpuHistBusy = false;
+  function histLoad() {
+    if (cpuHist) return Promise.resolve(cpuHist);
+    var fin = function (arr) { cpuHist = Array.isArray(arr) ? arr : []; return cpuHist; };
+    if (!bkReady()) return Promise.resolve(fin([]));
+    return fsCall('GET', '/cfg/h', null, true).then(function (d) { var x = d && docObj(d), a = []; try { a = JSON.parse(x.a); } catch (e) { } return fin(a); }, function () { return fin([]); });
+  }
+  function histSave() {
+    if (!bkReady() || !session || !cpuHist) return Promise.resolve();
+    return fsCall('PATCH', '/cfg/h', { fields: { a: toFS(JSON.stringify(cpuHist)), t: toFS(new Date()) } });
+  }
+  function histEntry(g, o, hanchan, diff, updated) { return { g: g, h: hanchan | 0, d: +diff || 0, u: updated || '', p: o.prm, c: o.cfg, s: null }; }
+  function histAdd(e) {
+    return histLoad().then(function (h) {
+      if (!h.some(function (x) { return x.u && x.u === e.u && x.g === e.g; })) h.push(e);
+      return histSave();
+    });
+  }
+  async function histSeed() {   // first time: record the standard CPU, the previous and the current generation
+    var h = await histLoad(), changed = false;
+    if (!h.length) { h.push(histEntry(0, { prm: MJ.AI.TUNED0, cfg: MJ.AI.TUNED_CFG0 }, 0, 0, '')); changed = true; }
+    var add = function (r) { if (r && !h.some(function (x) { return x.g === r.gen && (x.u === (r.updated || '') || JSON.stringify(x.p) === JSON.stringify(r.o.prm)); })) { h.push(histEntry(r.gen, r.o, r.hanchan, r.diff, r.updated)); changed = true; } };
+    if (bkReady()) { try { add(cpuFromDoc(await fsCall('GET', '/cfg/b', null, true))); } catch (e) { } }
+    if (cpuInfo) add(cpuInfo);
+    if (changed) { h.sort(function (a, b) { return String(a.u).localeCompare(String(b.u)); }); try { await histSave(); } catch (e) { } }
+    return h;
+  }
+  async function measureGen(o, total, prog) {
+    var a = { n: 0, hands: 0, wins: 0, deals: 0, riichi: 0, disc: 0, chipDisc: 0 };
+    while (a.n < total) {
+      for (var k = 0; k < 5 && a.n < total; k++) MJ.Learn.measureOne(o, 900001 + a.n, a);
+      if (prog) prog(a.n);
+      await yieldNow();
+    }
+    return { n: a.n, dl: a.deals / a.hands, wn: a.wins / a.hands, rc: a.riichi / a.hands, cd: a.chipDisc / a.disc, ck: a.disc ? Math.max(0, Math.min(1, 1 - (a.chipDisc / a.disc) / 0.077)) : 0 };
+  }
+  function histOpen(msg) {
+    histSeed().then(function () { if (isCpuModal()) showModal(histHTML(msg)); });
+    showModal(histHTML(msg || '読み込み中…'));
+  }
+  function isCpuModal() { return $('#modal h2') && /CPU強化|世代の比較/.test($('#modal h2').textContent); }
+  function histHTML(msg) {
+    var h = (cpuHist || []).slice().reverse(), cur = cpuInfo;
+    var pc = function (v) { return v === undefined || v === null ? '-' : (100 * v).toFixed(1) + '%'; };
+    var rows = h.map(function (e, i) {
+      var isCur = cur ? (e.g === cur.gen && JSON.stringify(e.p) === JSON.stringify(cur.o.prm)) : e.g === 0;
+      var s = e.s;
+      return '<tr' + (isCur ? ' style="font-weight:700"' : '') + '><td>' + (e.g ? '第' + e.g + '世代' : '標準') + (isCur ? '★' : '') + '</td><td>' + (e.h || '-') + '</td><td>' + (e.g ? (e.d >= 0 ? '+' : '') + e.d.toFixed(2) : '-') + '</td><td>' + (+e.p.chipKeep).toFixed(2) + '</td><td>' + (+e.p.dangerMul).toFixed(2) + '</td>' +
+        '<td>' + (s ? pc(s.dl) : '-') + '</td><td>' + (s ? Math.round(100 * s.ck) + '%' : '-') + '</td><td>' + (s ? pc(s.wn) : '-') + '</td><td>' + (s ? pc(s.rc) : '-') + '</td></tr>';
+    }).join('');
+    return '<h2>世代の比較</h2><p class="muted" style="font-size:12px">★=現在の世代。実測は同じ乱数の自己対戦(CPU3人×200半荘)で、世代間でそのまま比べられます。温存度・放銃率はCPUの打ち方、設定値は学習で動かした数値です。</p>' +
+      '<div style="overflow-x:auto"><table class="prof"><thead><tr><th>世代</th><th>学習半荘</th><th>検証差</th><th>温存度設定</th><th>危険度重み</th><th>放銃率</th><th>温存度</th><th>和了率</th><th>リーチ率</th></tr></thead><tbody>' + (rows || '<tr><td colspan="9">記録がありません</td></tr>') + '</tbody></table></div>' +
+      (msg ? '<p role="status">' + msg + '</p>' : '') +
+      '<div class="foot"><button class="btn ghost" data-act="cpuopen">戻る</button><button class="btn go" data-act="histmeasure">未計測の世代を計測</button></div>';
+  }
+  var histMeasuring = false;
+  async function histMeasure() {
+    if (histMeasuring) return; histMeasuring = true;
+    try {
+      var h = await histLoad(), todo = h.filter(function (e) { return !e.s; }), i;
+      for (i = 0; i < todo.length; i++) {
+        var e = todo[i], lab = (e.g ? '第' + e.g + '世代' : '標準') + ' を計測中… (' + (i + 1) + '/' + todo.length + ')';
+        e.s = await measureGen(sane0(e), 200, function (n) { if (isCpuModal()) showModal(histHTML(lab + ' ' + n + '/200')); });
+        try { await histSave(); } catch (x) { }
+      }
+      if (isCpuModal()) showModal(histHTML(todo.length ? '計測しました。' : 'すべて計測済みです。'));
+    } finally { histMeasuring = false; }
+  }
+  function sane0(e) { return MJ.Learn.sane({ prm: e.p, cfg: e.c }) || { prm: MJ.AI.TUNED0, cfg: MJ.AI.TUNED_CFG0 }; }
   function cpuMeasHTML() {
     var P = MJ.Learn.current().prm, a = cpuMeas, h = '<tr><th>祝儀牌温存度(設定値)</th><td>' + P.chipKeep.toFixed(2) + '(標準 2.00 / 大きいほど赤・ジュエルを切らない)</td></tr>' +
       '<tr><th>祝儀牌の危険重視(設定値)</th><td>' + P.dgChip.toFixed(2) + '(標準 1.00 / 大きいほど祝儀牌が絡む放銃を避ける)</td></tr>' +
@@ -4031,11 +4101,12 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     if (bkReady()) loadCpuParams().then(function () { if (!cpuTrain && !$('#modal').hidden && $('#modal h2') && /CPU強化/.test($('#modal h2').textContent)) showModal(cpuHTML('')); });
   }
   function cpuSave(o, gen, hanchan, diff) {
-    if (!bkReady()) return Promise.resolve('local');
+    var ent = histEntry(gen, o, hanchan, diff, new Date().toISOString());
+    if (!bkReady()) { histAdd(ent); return Promise.resolve('local'); }
     if (!session) return Promise.reject({ code: 'invalid_session' });
     var prev = cpuInfo;
     var pr = prev ? fsCall('PATCH', '/cfg/b', cpuParamDoc(prev.o, prev)) : Promise.resolve();
-    return pr.then(function () { return fsCall('PATCH', '/cfg/a', cpuParamDoc(o, { gen: gen, hanchan: hanchan, diff: diff })); }).then(function () { return 'server'; });
+    return pr.then(function () { return fsCall('PATCH', '/cfg/a', cpuParamDoc(o, { gen: gen, hanchan: hanchan, diff: diff })); }).then(function () { return histSeed().then(function () { return histAdd(ent); }).catch(function () { }); }).then(function () { return 'server'; });
   }
   function yieldNow() {   // MessageChannel is not throttled like setTimeout in background tabs
     return new Promise(function (res) { try { var c = new MessageChannel(); c.port1.onmessage = function () { res(); }; c.port2.postMessage(0); } catch (e) { setTimeout(res, 0); } });
@@ -5444,6 +5515,8 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     if (a === 'adminlogin') { var pw = ($('#adm-pw') || {}).value || ''; if (pw === ADMIN_PW) { S.admin = true; adminList(); } else { showModal(adminLoginHTML('パスワードが違います')); } return; }
     if (a === 'adminlist') { adminList(); return; }
     if (a === 'cpuopen') { cpuOpen(); return; }
+    if (a === 'histopen') { histOpen(''); return; }
+    if (a === 'histmeasure') { histMeasure(); return; }
     if (a === 'cpumeasure') { cpuMeasure(); return; }
     if (a === 'cpustart') { cpuStart(); return; }
     if (a === 'cpustop') { if (cpuTrain) cpuTrain.abort = true; return; }
