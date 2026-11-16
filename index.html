@@ -116,9 +116,12 @@ button:focus-visible, .tile:focus-visible { outline: 2px solid var(--gold); outl
 .btn.hot { background: #d9473a; border-color: #8e2a21; color: #fff; }
 .btn.on { box-shadow: 0 0 0 2px var(--gold); }
 .btn.ghost { background: transparent; color: var(--felt-ink); border-color: rgba(255,255,255,.35); }
-.sheet .btn.ghost { color: #111; font-weight: 700; background: #fff; border: 1.5px solid #444; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .sheet .btn.ghost { color: #f2f2f2; background: transparent; border-color: #aaa; } }
-:root[data-theme="dark"] .sheet .btn.ghost { color: #f2f2f2; background: transparent; border-color: #aaa; }
+/* ghost buttons were made for the dark felt; everywhere else (dialogs, start screen, ...) they get strong dark text */
+.btn.ghost { color: #111; font-weight: 700; background: #fff; border: 1.5px solid #444; }
+.table .btn.ghost { color: var(--felt-ink); font-weight: inherit; background: transparent; border: 1px solid rgba(255,255,255,.35); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .btn.ghost { color: #f2f2f2; background: transparent; border-color: #aaa; } :root:not([data-theme="light"]) .table .btn.ghost { color: var(--felt-ink); border-color: rgba(255,255,255,.35); } }
+:root[data-theme="dark"] .btn.ghost { color: #f2f2f2; background: transparent; border-color: #aaa; }
+:root[data-theme="dark"] .table .btn.ghost { color: var(--felt-ink); border-color: rgba(255,255,255,.35); }
 .btn[disabled] { opacity: .4; cursor: default; }
 .btn .tile { --tw: 18px; vertical-align: middle; box-shadow: none; }
 .hand { display: flex; align-items: flex-end; gap: 2px; padding-top: calc(var(--twb) * .3); min-height: calc(var(--twb) * 1.4 + var(--twb) * .3); flex-wrap: nowrap; }
@@ -1373,10 +1376,24 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
     for (i = 0; i < h.hands[seat].length; i++) if (h.hands[seat][i].id === id) { tt = h.hands[seat][i].t; break; }
     if (tt < 0) return 0;
     c[tt]--;
-    if (MJ.shantenStd(c, h.melds[seat].length) !== 0) return 0;   // fever needs a regular (4 sets + pair) tenpai: chiitoi (incl. 4-tile chiitoi) is not allowed
+    // the 7 must be a *fixed* concealed triplet: held as 3 tiles (or an ankan) and a triplet in every regular reading of the tenpai hand for every winning tile
+    // (e.g. 33345566777 is read 455667+77 as well, so it is not fixed). Chiitoi (incl. 4-tile chiitoi) never qualifies.
+    var m = h.melds[seat].length, decs = [], w;
+    for (w = 0; w < 34; w++) {
+      if (c[w] >= 4) continue;
+      c[w]++;
+      var d = MJ.decompose(c, 4 - m);
+      c[w]--;
+      if (d.length) decs.push(d);
+    }
+    if (!decs.length) return 0;
     var kan = {};
-    h.melds[seat].forEach(function (m) { if (m.kind === 'ankan') kan[m.tiles[0].t] = (kan[m.tiles[0].t] || 0) + 4; });
-    return [15, 24].filter(function (t) { return c[t] + (kan[t] || 0) >= 3; }).length;
+    h.melds[seat].forEach(function (mm) { if (mm.kind === 'ankan') kan[mm.tiles[0].t] = true; });
+    return [15, 24].filter(function (t) {
+      if (kan[t]) return true;
+      if (c[t] < 3) return false;
+      return decs.every(function (d) { return d.every(function (x) { return x.sets.some(function (st) { return st.k === 'tri' && st.t === t; }); }); });
+    }).length;
   };
   G.feverOptions = function (seat) {
     var self = this;
@@ -4561,7 +4578,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
       '<li>オープンリーチは2翻。リーチしていない人が振り込むと役満払い。副露してリーチしている場合も、ツモ和了なら門前清自摸和(1翻)が付きます。</li>' +
       '<li>四花: 1人で花牌4枚をすべて抜く(表・裏ドラ表示牌に出た花牌も含めて4枚そろう)と、和了時に祝儀+5枚。四北: 5萬4枚をすべて抜く・手牌で使う(表・裏ドラ表示牌の5萬も含む)と、和了時に祝儀+3枚。</li>' +
       '<li>【ドパ】5の牌に加え、全種類の牌から1枚ずつランダムにジュエル効果を持ち(毎局抽選)、数え役満は15翻以上、白ぽっちは3枚。【ドパドパ】同2枚ずつ、17翻以上、白ぽっち4枚。ドパ系は成績・ランキングに反映されず、半荘の最高祝儀枚数だけ個人記録に残ります。</li>' +
-      '<li>【フィーバーリーチ】7筒または7索を門前の暗刻(暗槓)で持ち、テンパイでリーチするとき選べます。全員の手牌が公開され全員ツモ切り。フィーバーした本人のみ和了でき、1回和了か流局まで継続(7筒7索ともに暗刻ならダブルフィーバーで2回和了まで)。公開時に待ち牌が山にないと即流局。白ぽっちはツモのみ。</li>' +
+      '<li>【フィーバーリーチ】7筒または7索を確定暗刻(暗槓、または待ちのどの読み方でも必ず暗刻になる3枚。七対子・七対子形は不可)で持つ門前の手で、テンパイでリーチするとき選べます。全員の手牌が公開され全員ツモ切り。フィーバーした本人のみ和了でき、1回和了か流局まで継続(7筒7索ともに暗刻ならダブルフィーバーで2回和了まで)。公開時に待ち牌が山にないと即流局。白ぽっちはツモのみ。</li>' +
       '<li>数え役満(13翻以上)で和了すると祝儀+5枚。夏の効果で数え役満に昇格した場合は祝儀+3枚です(サイコロはありません)。</li>' +
       '<li>本役満で和了すると祝儀に5枚と20面サイコロの出目が加算されます(オープンリーチの放銃による役満払いは対象外)。リーチ後に引いた加槓可能な牌は、ポンした牌なら加槓できます。</li>' +
       '<li>「リーチして和了なら上位の効果」のもの(春の大きい目、冬の下段など)は、副露していてリーチなしなら下位の効果になります。</li></ul>' +
