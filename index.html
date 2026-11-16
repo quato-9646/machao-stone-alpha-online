@@ -1370,6 +1370,7 @@ if (typeof module !== 'undefined' && module.exports) require('./score.js');
     for (i = 0; i < h.hands[seat].length; i++) if (h.hands[seat][i].id === id) { tt = h.hands[seat][i].t; break; }
     if (tt < 0) return 0;
     c[tt]--;
+    if (MJ.shantenStd(c, h.melds[seat].length) !== 0) return 0;   // fever needs a regular (4 sets + pair) tenpai: chiitoi (incl. 4-tile chiitoi) is not allowed
     var kan = {};
     h.melds[seat].forEach(function (m) { if (m.kind === 'ankan') kan[m.tiles[0].t] = (kan[m.tiles[0].t] || 0) + 4; });
     return [15, 24].filter(function (t) { return c[t] + (kan[t] || 0) >= 3; }).length;
@@ -2959,7 +2960,20 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     };
   }
   MJ.AI.TUNED0 = Object.assign({}, MJ.AI.TUNED); MJ.AI.TUNED_CFG0 = Object.assign({}, MJ.AI.TUNED_CFG);
-  MJ.Learn = { create: create, current: current, applyLearned: applyLearned, sane: sane, KEYS: KEYS };
+  // measure the CPU's tendencies by self-play (three identical CPUs): accumulates into acc
+  function measureOne(o, seed, acc) {
+    var cfg = polCfg(o), m = MJ.Sim.newMatch(['c', 'c', 'c'], ['a', 'b', 'c'], seed, seed % 3), g = m.g, n = 0;
+    g.ev = function (name, d) { if (name === 'discard') { acc.disc++; if (d.tile.red || d.tile.gem) acc.chipDisc++; } };
+    while (!g.over && n < 60) {
+      g.startHand();
+      var res = g.runHand(function (gg, req) { return MJ.AI.quickPolicy(gg, req, cfg); });
+      MJ.Sim.recordHand(m, res); g.prepareNext(); n++;
+    }
+    var r = MJ.Sim.matchResult(m);
+    m.stat.forEach(function (s) { acc.hands += s.hands; acc.wins += s.wins; acc.deals += s.deals; acc.riichi += s.riichi; });
+    acc.n++;
+  }
+  MJ.Learn = { measureOne: measureOne, create: create, current: current, applyLearned: applyLearned, sane: sane, KEYS: KEYS };
 })();
 
 (function () {
@@ -3966,7 +3980,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
   var RK_TABS = [['sum', '総収支'], ['avg', '平均着順'], ['chips', '最大祝儀'], ['totals', '最高スコア']];
 
   // ---- admin: CPU self-learning (the CPU that every player faces is shared, so the learned values live on the server) ----
-  var cpuInfo = null, cpuTrain = null;
+  var cpuInfo = null, cpuTrain = null, cpuMeas = null;
   function cpuParamDoc(o, info) {
     return { fields: { a: toFS(JSON.stringify(o.prm)), b: toFS(JSON.stringify(o.cfg)), c: toFS(info.gen | 0), d: toFS(info.hanchan | 0), e: toFS(+info.diff || 0), t: toFS(new Date()) } };
   }
@@ -3983,11 +3997,34 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     var i = cpuInfo;
     return '<h2>CPU強化(自己学習)</h2>' +
       '<p>全プレイヤーが対戦するCPUどうしを約3万半荘ぶん打たせて、押し引きなどの数値を少しずつ調整します。結果が本当に強くなったと確認できた時だけ採用し、サーバーに保存します(全員の次の対局から反映)。</p>' +
-      '<table class="prof"><tbody><tr><th>現在のCPU</th><td>' + (i ? '第' + i.gen + '世代(学習済み ' + i.hanchan + '半荘)' : '標準(まだ強化していません)') + '</td></tr>' +
+      '<table class="prof"><tbody><tr><th>現在のCPU</th><td>' + (i ? '第' + i.gen + '世代(学習済み ' + i.hanchan + '半荘)' : '標準(まだ強化していません)') + '</td></tr>' + cpuMeasHTML() +
       (i && i.updated ? '<tr><th>最終更新</th><td>' + esc(String(i.updated).replace('T', ' ').slice(0, 16)) + '(検証での差 ' + (i.diff >= 0 ? '+' : '') + i.diff.toFixed(2) + '/半荘)</td></tr>' : '') + '</tbody></table>' +
       '<p class="muted" style="font-size:12px">所要時間の目安は数分〜10分ほどです(端末の速さによります)。「1半荘あたり+1枚(1000点)ぶんの強化」を見分けられる回数にしてあります。実行中は画面を開いたままにしてください。学習中はこの画面を閉じないでください。</p>' +
       (msg ? '<p role="alert">' + msg + '</p>' : '') +
-      '<div class="foot"><button class="btn ghost" data-act="adminlist">戻る</button>' + (i ? '<button class="btn ghost" data-act="cpuundo">ひとつ前に戻す</button><button class="btn ghost" data-act="cpureset">標準に戻す</button>' : '') + '<button class="btn go" data-act="cpustart">強化を開始(約3万半荘)</button></div>';
+      '<div class="foot"><button class="btn ghost" data-act="adminlist">戻る</button>' + (i ? '<button class="btn ghost" data-act="cpuundo">ひとつ前に戻す</button><button class="btn ghost" data-act="cpureset">標準に戻す</button>' : '') + '<button class="btn ghost" data-act="cpumeasure">現在の世代を計測(300半荘)</button><button class="btn go" data-act="cpustart">強化を開始(約3万半荘)</button></div>';
+  }
+  function cpuMeasHTML() {
+    var P = MJ.Learn.current().prm, a = cpuMeas, h = '<tr><th>祝儀牌温存度(設定値)</th><td>' + P.chipKeep.toFixed(2) + '(標準 2.00 / 大きいほど赤・ジュエルを切らない)</td></tr>' +
+      '<tr><th>祝儀牌の危険重視(設定値)</th><td>' + P.dgChip.toFixed(2) + '(標準 1.00 / 大きいほど祝儀牌が絡む放銃を避ける)</td></tr>' +
+      '<tr><th>危険度の重み(設定値)</th><td>' + P.dangerMul.toFixed(2) + '(標準 1.00)</td></tr>';
+    if (a && a.done) {
+      var keep = a.disc ? Math.max(0, Math.min(1, 1 - (a.chipDisc / a.disc) / 0.077)) : 0;
+      h += '<tr><th>放銃率(実測)</th><td><b>' + (100 * a.deals / a.hands).toFixed(1) + '%</b>(1局あたり放銃)</td></tr>' +
+        '<tr><th>祝儀牌温存度(実測)</th><td><b>' + Math.round(keep * 100) + '%</b>(赤・ジュエルを切った割合 ' + (100 * a.chipDisc / a.disc).toFixed(2) + '% / 全打牌。マイ成績の温存度と同じ計算)</td></tr>' +
+        '<tr><th>和了率・リーチ率(実測)</th><td>' + (100 * a.wins / a.hands).toFixed(1) + '% / ' + (100 * a.riichi / a.hands).toFixed(1) + '%(' + a.n + '半荘・CPU3人の自己対戦、' + a.hands + '局ぶん)</td></tr>';
+    } else if (a) h += '<tr><th>実測</th><td>計測中… ' + a.n + ' / ' + a.total + ' 半荘</td></tr>';
+    return h;
+  }
+  async function cpuMeasure() {
+    if (cpuMeas && !cpuMeas.done) return;
+    var a = cpuMeas = { n: 0, total: 300, hands: 0, wins: 0, deals: 0, riichi: 0, disc: 0, chipDisc: 0, done: false }, o = MJ.Learn.current();
+    while (a.n < a.total) {
+      for (var k = 0; k < 5 && a.n < a.total; k++) MJ.Learn.measureOne(o, 900001 + a.n, a);
+      if ($('#modal h2') && /CPU強化/.test($('#modal h2').textContent)) showModal(cpuHTML(''));
+      await yieldNow();
+    }
+    a.done = true;
+    if ($('#modal h2') && /CPU強化/.test($('#modal h2').textContent)) showModal(cpuHTML(''));
   }
   function cpuOpen() {
     showModal(cpuHTML(''));
@@ -5407,6 +5444,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     if (a === 'adminlogin') { var pw = ($('#adm-pw') || {}).value || ''; if (pw === ADMIN_PW) { S.admin = true; adminList(); } else { showModal(adminLoginHTML('パスワードが違います')); } return; }
     if (a === 'adminlist') { adminList(); return; }
     if (a === 'cpuopen') { cpuOpen(); return; }
+    if (a === 'cpumeasure') { cpuMeasure(); return; }
     if (a === 'cpustart') { cpuStart(); return; }
     if (a === 'cpustop') { if (cpuTrain) cpuTrain.abort = true; return; }
     if (a === 'cpuundo') { cpuRestore('undo'); return; }
@@ -5558,7 +5596,7 @@ var MJ = (typeof module !== 'undefined' && module.exports) ? require('./core.js'
     $('#btn-settings').addEventListener('click', function () { showModal(settingsHTML()); });
     renderAll();
   }
-  window.MJUI = { _submit: function () { return submitMatchResult(); }, _showRes: function (res) { showModal(resultHTML(res)); }, _cutin: function (id, who, gain, first) { var c = CUTINS.filter(function (x) { return x.id === id; })[0]; return cutinFx({ seat: 0, tsumo: true }, c, gain, first); }, _special: specialVoice, _bigFx: bigFx, _winSnap: function (w) { return winSnap(w); }, _snapHTML: snapHTML, _bk: function (f, x) { return bkCall(f, x); }, init: init, S: S, getGame: function () { return game; }, startMatch: startMatch, _wildHTML: wildHTML, _show: showModal, _render: renderAll };
+  window.MJUI = { _cpuOpen: function () { cpuOpen(); }, _submit: function () { return submitMatchResult(); }, _showRes: function (res) { showModal(resultHTML(res)); }, _cutin: function (id, who, gain, first) { var c = CUTINS.filter(function (x) { return x.id === id; })[0]; return cutinFx({ seat: 0, tsumo: true }, c, gain, first); }, _special: specialVoice, _bigFx: bigFx, _winSnap: function (w) { return winSnap(w); }, _snapHTML: snapHTML, _bk: function (f, x) { return bkCall(f, x); }, init: init, S: S, getGame: function () { return game; }, startMatch: startMatch, _wildHTML: wildHTML, _show: showModal, _render: renderAll };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 
